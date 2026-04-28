@@ -1,0 +1,13 @@
+{
+  "name": "markdown-momma",
+  "version": "1.0.0",
+  "description": "Capture AI conversations and save as Markdown, PDF, or Print",
+  "private": true,
+  "scripts": {
+    "build": "node build.js",
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});console.log('Cleaned dist/');\""
+  },
+  "keywords": ["chrome-extension", "markdown", "ai", "conversation-capture"],
+  "author": "WebDood",
+  "license": "MIT"
+}

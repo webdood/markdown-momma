@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MarkDown Momma — Install</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=DM+Sans:ital,wght@0,400;0,500;0,700;1,400&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: #0e0e1a;
+      color: #d4d4d8;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 60px 24px;
+    }
+
+    .container {
+      max-width: 640px;
+      width: 100%;
+    }
+
+    .hero {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+
+    .hero-icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      font-size: 36px;
+      font-weight: 700;
+      color: #ff6b95;
+      margin-bottom: 12px;
+      letter-spacing: -0.5px;
+    }
+
+    .tagline {
+      font-size: 17px;
+      color: #888;
+      line-height: 1.6;
+    }
+
+    /* ---- BOOKMARKLET BUTTON ---- */
+    .install-section {
+      background: linear-gradient(135deg, #1a1a2e, #16213e);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px;
+      padding: 36px;
+      text-align: center;
+      margin-bottom: 36px;
+    }
+
+    .install-section h2 {
+      font-size: 18px;
+      color: #4ecdc4;
+      margin-bottom: 8px;
+    }
+
+    .install-instructions {
+      color: #888;
+      font-size: 14px;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+
+    .bookmarklet-link {
+      display: inline-block;
+      background: linear-gradient(135deg, #ff6b95, #ff4778);
+      color: #fff;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 18px;
+      font-weight: 700;
+      padding: 16px 36px;
+      border-radius: 12px;
+      text-decoration: none;
+      cursor: grab;
+      transition: all 0.2s ease;
+      box-shadow: 0 8px 32px rgba(255,107,149,0.3);
+      letter-spacing: 0.3px;
+    }
+
+    .bookmarklet-link:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px rgba(255,107,149,0.4);
+    }
+
+    .bookmarklet-link:active {
+      cursor: grabbing;
+    }
+
+    .drag-hint {
+      margin-top: 16px;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .drag-hint .arrow {
+      display: inline-block;
+      animation: bounce 1.5s ease infinite;
+      font-size: 18px;
+    }
+
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+
+    /* ---- MANUAL SECTION ---- */
+    .manual-section {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.04);
+      border-radius: 12px;
+      padding: 28px;
+      margin-bottom: 36px;
+    }
+
+    .manual-section h3 {
+      font-size: 15px;
+      color: #a78bfa;
+      margin-bottom: 12px;
+    }
+
+    .manual-section p {
+      font-size: 14px;
+      color: #888;
+      line-height: 1.7;
+      margin-bottom: 12px;
+    }
+
+    .manual-section ol {
+      padding-left: 20px;
+      font-size: 14px;
+      color: #999;
+      line-height: 2;
+    }
+
+    .manual-section code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      background: rgba(255,255,255,0.06);
+      padding: 2px 8px;
+      border-radius: 4px;
+      color: #4ecdc4;
+    }
+
+    .copy-btn {
+      background: rgba(78,205,196,0.12);
+      border: 1px solid rgba(78,205,196,0.2);
+      color: #4ecdc4;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-top: 8px;
+    }
+
+    .copy-btn:hover {
+      background: rgba(78,205,196,0.2);
+    }
+
+    /* ---- FEATURES ---- */
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 36px;
+    }
+
+    .feature {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.04);
+      border-radius: 10px;
+      padding: 20px;
+    }
+
+    .feature-icon {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+
+    .feature h4 {
+      font-size: 14px;
+      color: #e0e0e0;
+      margin-bottom: 6px;
+    }
+
+    .feature p {
+      font-size: 12px;
+      color: #777;
+      line-height: 1.5;
+    }
+
+    /* ---- FOOTER ---- */
+    .footer {
+      text-align: center;
+      color: #444;
+      font-size: 12px;
+      padding-top: 24px;
+      border-top: 1px solid rgba(255,255,255,0.04);
+    }
+
+    .footer a {
+      color: #555;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <div class="hero-icon">📝</div>
+      <h1>MarkDown Momma</h1>
+      <p class="tagline">
+        Capture AI conversations from Claude, ChatGPT, Gemini, Copilot &amp; more.<br>
+        Save as Markdown, PDF, or Print. Works on any page.
+      </p>
+    </div>
+
+    <!-- INSTALL -->
+    <div class="install-section">
+      <h2>Install the Bookmarklet</h2>
+      <p class="install-instructions">
+        Drag the button below to your <strong>Bookmarks Bar</strong>.<br>
+        Click it on any page to capture content as Markdown.
+      </p>
+
+      <a class="bookmarklet-link"
+         href="javascript:void((function(){if(window.__markdownMommaActive){alert('MarkDown Momma is already active!');return;}var d=document,base='https://rendercorporation.com/mdm/';function loadScript(url,cb){var s=d.createElement('script');s.src=url+'?v='+Date.now();s.onload=cb;s.onerror=function(){alert('MarkDown Momma: Failed to load '+url);};d.head.appendChild(s);}loadScript(base+'turndown.min.js',function(){loadScript(base+'mdm.js',function(){console.log('MarkDown Momma loaded!');});});})())"
+         onclick="alert('Don\u0027t click \u2014 drag me to your Bookmarks Bar!'); return false;">
+        📝 MarkDown Momma
+      </a>
+
+      <p class="drag-hint">
+        <span class="arrow">⬆</span> Drag this to your Bookmarks Bar
+      </p>
+    </div>
+
+    <!-- MANUAL FALLBACK -->
+    <div class="manual-section">
+      <h3>Manual Install (for restricted pages)</h3>
+      <p>
+        Some pages (like <code>chrome://</code> URLs) block bookmarklets.
+        For those, open DevTools (F12) → Console and paste these two scripts in order:
+      </p>
+      <ol>
+        <li>Paste contents of <code>turndown.min.js</code></li>
+        <li>Paste contents of <code>mdm.js</code></li>
+      </ol>
+      <p>Or paste this one-liner to load them from the server:</p>
+      <code id="console-snippet" style="display:block; margin-top:8px; padding:10px; font-size:11px; word-break:break-all; line-height:1.6;">
+        fetch('https://rendercorporation.com/mdm/turndown.min.js').then(r=>r.text()).then(t=>{eval(t);fetch('https://rendercorporation.com/mdm/mdm.js').then(r=>r.text()).then(eval)})
+      </code>
+      <button class="copy-btn" onclick="copySnippet()">Copy to Clipboard</button>
+    </div>
+
+    <!-- FEATURES -->
+    <div class="features">
+      <div class="feature">
+        <div class="feature-icon">🎯</div>
+        <h4>Smart Detection</h4>
+        <p>Auto-detects Claude, ChatGPT, Gemini, Copilot &amp; Perplexity conversation containers.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🔍</div>
+        <h4>Element Picker</h4>
+        <p>AdBlock-style hover &amp; click to capture any DOM element on any page.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">📜</div>
+        <h4>Auto-Scroll</h4>
+        <p>Scrolls through lazy-loaded content to capture entire conversations.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🖼️</div>
+        <h4>Image Capture</h4>
+        <p>Converts images to data URIs. Cross-origin images get wrapped in clickable links.</p>
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>MarkDown Momma v1.0 &mdash; <a href="https://rendercorporation.com">Render Corporation</a></p>
+    </div>
+  </div>
+
+  <script>
+    function copySnippet() {
+      var text = document.getElementById('console-snippet').textContent.trim();
+      navigator.clipboard.writeText(text).then(function() {
+        var btn = document.querySelector('.copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(function() { btn.textContent = 'Copy to Clipboard'; }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>
