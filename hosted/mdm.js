@@ -24,10 +24,14 @@
   const SCROLL_STEP_PX = 600;
   const SCROLL_PAUSE_MS = 800;
   const FILENAME_PREFIX = "MarkDownMomma_";
+  const MIN_CONTENT_LENGTH = 200;
+  const CONFIRM_BORDER = "3px solid #4ecdc4";
 
   ///////////////////////////////////////////////////////////////////////////
   // SITE SELECTORS - auto-detect known AI chat containers                 //
   // ==============                                                        //
+  // Selectors tried in order per site. First match with >100 chars wins.  //
+  // If all miss, heuristic fallback runs (see findConversationHeuristic). //
   ///////////////////////////////////////////////////////////////////////////
 
   const SITE_SELECTORS = [
@@ -36,8 +40,10 @@
       hostPattern: /claude\.ai/,
       selectors: [
         "[data-testid='conversation-turn-list']",
+        "div[class*='ConversationContent']",
+        "div[class*='conversation']",
         "div.flex-1.flex.flex-col.gap-3",
-        "main div[class*='conversation']",
+        "[role='main'] > div > div > div",
         "main"
       ]
     },
@@ -45,6 +51,7 @@
       name: "ChatGPT",
       hostPattern: /chat\.openai\.com|chatgpt\.com/,
       selectors: [
+        "[role='presentation'] main div[class*='react-scroll']",
         "div[role='presentation'] main",
         "main .flex.flex-col.items-center",
         "main"
@@ -54,15 +61,17 @@
       name: "Gemini",
       hostPattern: /gemini\.google\.com/,
       selectors: [
+        "infinite-scroller",
         "chat-window",
-        "main",
-        ".conversation-container"
+        ".conversation-container",
+        "main"
       ]
     },
     {
       name: "Copilot",
       hostPattern: /copilot\.microsoft\.com/,
       selectors: [
+        "cib-serp",
         "#app",
         "main"
       ]
@@ -72,6 +81,14 @@
       hostPattern: /perplexity\.ai/,
       selectors: [
         "main .flex.flex-col",
+        "main"
+      ]
+    },
+    {
+      name: "Grok",
+      hostPattern: /grok\.com|x\.com\/i\/grok/,
+      selectors: [
+        "main [class*='conversation']",
         "main"
       ]
     }
@@ -85,6 +102,8 @@
   let hoveredEl = null;
   let autoDetectedEl = null;
   let bannerEl = null;
+  let confirmBarEl = null;
+  let selectedEl = null;
   let modalContainer = null;
   let progressEl = null;
   let previewMode = "rendered"; // "rendered" or "raw"
@@ -113,16 +132,338 @@
 
   function autoDetectContainer() {
     const host = window.location.hostname;
+
+    // Try explicit selectors first
     for (const site of SITE_SELECTORS) {
       if (!site.hostPattern.test(host)) continue;
       for (const sel of site.selectors) {
-        const el = document.querySelector(sel);
-        if (el && el.innerText.trim().length > 100) {
-          return { el, siteName: site.name };
+        try {
+          const el = document.querySelector(sel);
+          if (el && el.innerText.trim().length > 100) {
+            // Run the scorer to see if this is actually a good pick
+            const score = scoreConversationNode(el);
+            if (score > 0) {
+              return { el, siteName: site.name };
+            }
+          }
+        } catch (e) {
+          // Selector might be invalid on this page, skip
         }
+      }
+
+      // Selectors all missed — try heuristic for this known site
+      const heuristic = findConversationHeuristic();
+      if (heuristic) {
+        return { el: heuristic, siteName: site.name + " (detected)" };
       }
     }
     return null;
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // destroyConfirmBar - removes the selection confirmation bar            //
+  // ==================                                                    //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function destroyConfirmBar() {
+    if (confirmBarEl) {
+      confirmBarEl.remove();
+      confirmBarEl = null;
+    }
+    if (selectedEl) {
+      selectedEl.style.outline = selectedEl.__mdmOrigOutline || "";
+      delete selectedEl.__mdmOrigOutline;
+    }
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // findBestContainer - walks UP the DOM from a clicked node, scores     //
+  //                     each ancestor, returns the best conversation      //
+  //                     container candidate                               //
+  // ==================                                                    //
+  // Scoring favors: text length, number of substantial children with      //
+  // repeated structure (conversation turns), scrollability, and depth     //
+  // from body (not too shallow, not too deep).                            //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function findBestContainer(startEl) {
+    let best = startEl;
+    let bestScore = scoreConversationNode(startEl);
+    let node = startEl.parentElement;
+    let climbs = 0;
+    const maxClimbs = 15;
+
+    while (node && node !== document.body && node !== document.documentElement && climbs < maxClimbs) {
+      const score = scoreConversationNode(node);
+
+      // Take this node if it scores higher, but stop climbing once
+      // we hit a node that's clearly "too big" (nearly the whole page)
+      const nodeTextLen = node.innerText.trim().length;
+      const bodyTextLen = document.body.innerText.trim().length;
+      if (nodeTextLen > bodyTextLen * 0.95) break;
+
+      if (score > bestScore) {
+        best = node;
+        bestScore = score;
+      }
+
+      node = node.parentElement;
+      climbs++;
+    }
+
+    return best;
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // findConversationHeuristic - selector-free conversation finder         //
+  // ==========================                                            //
+  // Scans all elements looking for the one that scores highest as a       //
+  // conversation container. Used as fallback when explicit selectors      //
+  // miss.                                                                 //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function findConversationHeuristic() {
+    // Candidates: scrollable containers with substantial text
+    const candidates = [];
+
+    // Check all elements with overflow scroll/auto that contain text
+    const allEls = document.querySelectorAll("main, article, section, [role='main'], [role='log'], div");
+    for (const el of allEls) {
+      const textLen = el.innerText.trim().length;
+      if (textLen < MIN_CONTENT_LENGTH) continue;
+
+      // Skip tiny elements and our own UI
+      if (el.closest("#mdm-banner") || el.closest("#mdm-modal-container")) continue;
+
+      const score = scoreConversationNode(el);
+      if (score > 0) {
+        candidates.push({ el, score });
+      }
+    }
+
+    if (candidates.length === 0) return null;
+
+    // Sort by score descending, return the winner
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0].el;
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // highlightSelected - shows outline on the currently selected element   //
+  // ==================                                                    //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function highlightSelected(el) {
+    // Clear previous
+    if (selectedEl && selectedEl !== el) {
+      selectedEl.style.outline = selectedEl.__mdmOrigOutline || "";
+      delete selectedEl.__mdmOrigOutline;
+    }
+
+    selectedEl = el;
+    selectedEl.__mdmOrigOutline = selectedEl.style.outline;
+    selectedEl.style.outline = CONFIRM_BORDER;
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // scoreConversationNode - scores an element as conversation container   //
+  // ======================                                                //
+  // Returns 0 for clearly wrong, higher is better. Factors:               //
+  //   - total text length (more is better, up to a point)                 //
+  //   - number of substantial child blocks (conversation turns)           //
+  //   - structural repetition (siblings with similar tag/class shapes)    //
+  //   - is a scrollable container                                         //
+  //   - penalize: inputs, textareas, navs, single-child wrappers         //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function scoreConversationNode(el) {
+    if (!el || el === document.body || el === document.documentElement) return 0;
+
+    const tag = el.tagName.toLowerCase();
+
+    // Instant disqualifiers
+    if (["input", "textarea", "button", "nav", "footer", "header", "script", "style", "svg"].includes(tag)) {
+      return 0;
+    }
+
+    // Disqualify if it's an input area (chat input box)
+    if (el.getAttribute("contenteditable") === "true") return 0;
+    if (el.getAttribute("role") === "textbox") return 0;
+
+    // Disqualify if it contains a textarea/contenteditable as primary content
+    const editables = el.querySelectorAll("textarea, [contenteditable='true'], [role='textbox']");
+    const textLen = el.innerText.trim().length;
+    if (editables.length > 0 && textLen < 500) return 0;
+
+    let score = 0;
+
+    // Text length scoring (log scale — 10K chars and 100K chars shouldn't be 10x apart)
+    if (textLen < MIN_CONTENT_LENGTH) return 0;
+    score += Math.min(Math.log10(textLen) * 15, 80);
+
+    // Count substantial child blocks (>50 chars each)
+    const children = Array.from(el.children);
+    const substantialChildren = children.filter(c => {
+      return c.innerText && c.innerText.trim().length > 50;
+    });
+    const turnCount = substantialChildren.length;
+
+    // Conversation-like: multiple substantial children
+    if (turnCount >= 2) score += Math.min(turnCount * 8, 60);
+    if (turnCount < 2) score -= 20;
+
+    // Structural repetition bonus — do siblings share similar shapes?
+    if (substantialChildren.length >= 3) {
+      const shapes = substantialChildren.map(c => c.tagName + "." + (c.className || "").split(" ").sort().join("."));
+      const uniqueShapes = new Set(shapes).size;
+      const repetitionRatio = 1 - (uniqueShapes / shapes.length);
+      score += repetitionRatio * 40; // 1.0 = perfect repetition = +40
+    }
+
+    // Scrollable container bonus
+    const style = window.getComputedStyle(el);
+    const overflowY = style.overflowY;
+    if ((overflowY === "auto" || overflowY === "scroll") && el.scrollHeight > el.clientHeight + 50) {
+      score += 25;
+    }
+
+    // Semantic tag bonus
+    if (["main", "article", "section"].includes(tag)) score += 10;
+    if (el.getAttribute("role") === "main" || el.getAttribute("role") === "log") score += 10;
+
+    // Penalize if nearly all the text is from a single child (wrapper div)
+    if (children.length === 1 && children[0].innerText) {
+      const childTextLen = children[0].innerText.trim().length;
+      if (childTextLen > textLen * 0.9) score -= 15;
+    }
+
+    return Math.max(score, 0);
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // showConfirmBar - shows the Wider/Narrower/Confirm bar after picking  //
+  // ==============                                                        //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function showConfirmBar(el) {
+    destroyConfirmBar();
+    highlightSelected(el);
+
+    const textLen = el.innerText.trim().length;
+    const tag = el.tagName.toLowerCase();
+    const childCount = el.children.length;
+    const score = scoreConversationNode(el);
+
+    confirmBarEl = document.createElement("div");
+    confirmBarEl.id = "mdm-confirm-bar";
+    confirmBarEl.innerHTML = `
+      <style>
+        #mdm-confirm-bar {
+          position: fixed;
+          bottom: 20px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: linear-gradient(135deg, #1a1a2e, #16213e);
+          color: #e0e0e0;
+          padding: 12px 20px;
+          border-radius: 12px;
+          z-index: 2147483645;
+          font-family: 'DM Sans', -apple-system, sans-serif;
+          font-size: 13px;
+          box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08);
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          animation: mdmSlideUp 0.3s ease-out;
+          max-width: 90vw;
+        }
+        @keyframes mdmSlideUp {
+          from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+          to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+        #mdm-confirm-bar .mdm-info {
+          color: #888;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+          white-space: nowrap;
+        }
+        #mdm-confirm-bar .mdm-info strong {
+          color: #4ecdc4;
+        }
+        #mdm-confirm-bar button {
+          border: none;
+          border-radius: 6px;
+          padding: 6px 12px;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          font-family: inherit;
+          transition: all 0.15s;
+        }
+        #mdm-confirm-bar button:hover { transform: translateY(-1px); }
+        .mdm-cb-wider  { background: #a78bfa; color: #fff; }
+        .mdm-cb-narrower { background: #f59e0b; color: #0a0a14; }
+        .mdm-cb-confirm { background: #4ecdc4; color: #0a0a14; }
+        .mdm-cb-cancel  { background: rgba(255,255,255,0.08); color: #aaa; }
+        .mdm-cb-wider:disabled, .mdm-cb-narrower:disabled {
+          opacity: 0.3;
+          cursor: not-allowed;
+          transform: none !important;
+        }
+      </style>
+      <span>\u{1F4DD}</span>
+      <span class="mdm-info">
+        <strong>&lt;${tag}&gt;</strong>
+        ${textLen.toLocaleString()} chars \u00B7
+        ${childCount} children \u00B7
+        score ${Math.round(score)}
+      </span>
+      <button class="mdm-cb-wider" id="mdm-cb-wider">\u2B06 Wider</button>
+      <button class="mdm-cb-narrower" id="mdm-cb-narrower">\u2B07 Narrower</button>
+      <button class="mdm-cb-confirm" id="mdm-cb-confirm">\u2714 Capture</button>
+      <button class="mdm-cb-cancel" id="mdm-cb-cancel">\u2715</button>
+    `;
+    document.body.appendChild(confirmBarEl);
+
+    // Disable wider if parent is body
+    const parent = el.parentElement;
+    if (!parent || parent === document.body || parent === document.documentElement) {
+      confirmBarEl.querySelector("#mdm-cb-wider").disabled = true;
+    }
+
+    // Disable narrower if no substantial children
+    const substantialKids = Array.from(el.children).filter(c => c.innerText && c.innerText.trim().length > 50);
+    if (substantialKids.length === 0) {
+      confirmBarEl.querySelector("#mdm-cb-narrower").disabled = true;
+    }
+
+    // Wire buttons
+    confirmBarEl.querySelector("#mdm-cb-wider").addEventListener("click", () => {
+      const p = el.parentElement;
+      if (p && p !== document.body && p !== document.documentElement) {
+        showConfirmBar(p);
+      }
+    });
+
+    confirmBarEl.querySelector("#mdm-cb-narrower").addEventListener("click", () => {
+      // Find the child with the most text content
+      const kids = Array.from(el.children).filter(c => c.innerText && c.innerText.trim().length > 50);
+      if (kids.length > 0) {
+        kids.sort((a, b) => b.innerText.trim().length - a.innerText.trim().length);
+        showConfirmBar(kids[0]);
+      }
+    });
+
+    confirmBarEl.querySelector("#mdm-cb-confirm").addEventListener("click", () => {
+      const captureTarget = selectedEl;
+      destroyConfirmBar();
+      captureElement(captureTarget);
+    });
+
+    confirmBarEl.querySelector("#mdm-cb-cancel").addEventListener("click", () => {
+      destroyConfirmBar();
+      shutdown();
+    });
   }
 
   ///////////////////////////////////////////////////////////////////////////
@@ -1308,7 +1649,7 @@
 
     bannerEl.querySelector(".mdm-banner-accept").addEventListener("click", () => {
       destroyBanner();
-      captureElement(el);
+      showConfirmBar(el);
     });
     bannerEl.querySelector(".mdm-banner-pick").addEventListener("click", () => {
       destroyBanner();
@@ -1432,7 +1773,12 @@
     const target = hoveredEl || e.target;
     clearHighlight();
     deactivatePicker();
-    captureElement(target);
+
+    // Smart climb: find the best conversation container
+    const best = findBestContainer(target);
+
+    // Show confirmation bar so user can navigate wider/narrower
+    showConfirmBar(best);
   }
 
   ///////////////////////////////////////////////////////////////////////////
@@ -1477,6 +1823,7 @@
   function shutdown() {
     deactivatePicker();
     destroyBanner();
+    destroyConfirmBar();
     destroyModal();
     destroyProgress();
     window.__markdownMommaActive = false;
