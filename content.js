@@ -91,6 +91,21 @@
         "main [class*='conversation']",
         "main"
       ]
+    },
+    {
+      name: "Google AI (Search)",
+      hostPattern: /www\.google\.com|google\.com/,
+      // Only trigger when AI params are present in the URL
+      urlPattern: /[?&](aioh|udm=50|atvm)/,
+      selectors: [
+        "[data-attrid='wa:/summary']",
+        "div[jsname] div[data-q]",
+        "[data-md]",
+        "div[class*='ai-overview']",
+        "div[class*='AiOverview']",
+        "#rso div[data-attrid]",
+        "#center_col"
+      ]
     }
   ];
 
@@ -136,6 +151,10 @@
     // Try explicit selectors first
     for (const site of SITE_SELECTORS) {
       if (!site.hostPattern.test(host)) continue;
+
+      // If a urlPattern is specified, also check the full URL
+      if (site.urlPattern && !site.urlPattern.test(window.location.href)) continue;
+
       for (const sel of site.selectors) {
         try {
           const el = document.querySelector(sel);
@@ -172,7 +191,12 @@
     }
     if (selectedEl) {
       selectedEl.style.outline = selectedEl.__mdmOrigOutline || "";
+      selectedEl.style.backgroundColor = selectedEl.__mdmOrigBg || "";
+      selectedEl.style.outlineOffset = "";
+      selectedEl.style.transition = "";
       delete selectedEl.__mdmOrigOutline;
+      delete selectedEl.__mdmOrigBg;
+      selectedEl = null;
     }
   }
 
@@ -257,12 +281,30 @@
     // Clear previous
     if (selectedEl && selectedEl !== el) {
       selectedEl.style.outline = selectedEl.__mdmOrigOutline || "";
+      selectedEl.style.backgroundColor = selectedEl.__mdmOrigBg || "";
+      selectedEl.style.outlineOffset = "";
       delete selectedEl.__mdmOrigOutline;
+      delete selectedEl.__mdmOrigBg;
     }
 
     selectedEl = el;
     selectedEl.__mdmOrigOutline = selectedEl.style.outline;
-    selectedEl.style.outline = CONFIRM_BORDER;
+    selectedEl.__mdmOrigBg = selectedEl.style.backgroundColor;
+    selectedEl.style.outline = HIGHLIGHT_BORDER;
+    selectedEl.style.backgroundColor = HIGHLIGHT_COLOR;
+    selectedEl.style.outlineOffset = "2px";
+
+    // Scroll the element into view so you can see what you picked
+    selectedEl.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    // Brief flash to draw the eye — pulse the outline thicker then back
+    selectedEl.style.transition = "outline-width 0.15s ease";
+    selectedEl.style.outlineWidth = "5px";
+    setTimeout(() => {
+      if (selectedEl === el) {
+        selectedEl.style.outlineWidth = "2px";
+      }
+    }, 250);
   }
 
   ///////////////////////////////////////////////////////////////////////////
@@ -472,7 +514,7 @@
   ///////////////////////////////////////////////////////////////////////////
 
   async function autoScrollAndCapture(el) {
-    const scroller = findScrollableAncestor(el);
+    const scroller = findScrollContainer(el);
     if (!scroller) {
       return el.innerHTML;
     }
@@ -573,11 +615,47 @@
   }
 
   ///////////////////////////////////////////////////////////////////////////
+  // flattenShadowRoots - recursively extracts shadow DOM content          //
+  // ===================                                                   //
+  // Walks a cloned tree and replaces elements that had shadow roots with  //
+  // their shadow content inlined. Call on a clone, not the live DOM.      //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function flattenShadowRoots(el) {
+    // Walk the LIVE element tree to find shadow roots, then inject
+    // their content into the corresponding cloned nodes.
+    // Since cloneNode doesn't copy shadow DOMs, we do it manually.
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT);
+    const shadowHosts = [];
+
+    let node = walker.nextNode();
+    while (node) {
+      if (node.shadowRoot) {
+        shadowHosts.push(node);
+      }
+      node = walker.nextNode();
+    }
+
+    // For each shadow host, grab the shadow innerHTML
+    for (const host of shadowHosts) {
+      const shadowHTML = host.shadowRoot.innerHTML;
+      // Inject shadow content as regular children
+      const wrapper = document.createElement("div");
+      wrapper.setAttribute("data-mdm-shadow", "true");
+      wrapper.innerHTML = shadowHTML;
+      host.appendChild(wrapper);
+    }
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
   // captureImagesAsDataURI - converts all img in element to dataURIs      //
   // ======================                                                //
   ///////////////////////////////////////////////////////////////////////////
 
   async function captureImagesAsDataURI(el) {
+    // Flatten any shadow DOM content into the live element BEFORE cloning
+    flattenShadowRoots(el);
+
     const clone = el.cloneNode(true);
     const images = clone.querySelectorAll("img");
     const total = images.length;
@@ -817,12 +895,18 @@
   }
 
   ///////////////////////////////////////////////////////////////////////////
-  // findScrollableAncestor - walks up the DOM for the scroll container    //
-  // ======================                                                //
+  // findScrollContainer - finds the scrollable container for an element    //
+  // ====================                                                  //
+  // Looks UP (ancestors) first, then DOWN (descendants) if nothing found. //
+  // This handles the case where the user went "wider" past the actual     //
+  // scroll container — the scroller is now a child, not a parent.         //
   ///////////////////////////////////////////////////////////////////////////
 
-  function findScrollableAncestor(el) {
+  function findScrollContainer(el) {
+    // Check if the element itself scrolls
     if (el.scrollHeight > el.clientHeight + 50) return el;
+
+    // Walk UP — classic ancestor search
     let node = el.parentElement;
     while (node && node !== document.body && node !== document.documentElement) {
       const style = window.getComputedStyle(node);
@@ -835,9 +919,59 @@
       }
       node = node.parentElement;
     }
+
+    // Walk DOWN — find scrollable descendants (user went "wider")
+    const scrollableChild = findScrollableDescendant(el);
+    if (scrollableChild) return scrollableChild;
+
+    // Last resort: documentElement
     const docEl = document.documentElement;
     if (docEl.scrollHeight > docEl.clientHeight + 50) return docEl;
+
     return null;
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // findScrollableDescendant - searches children for a scroll container   //
+  // ========================                                              //
+  // BFS through descendants looking for the largest scrollable element.   //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function findScrollableDescendant(el) {
+    let best = null;
+    let bestArea = 0;
+
+    // BFS with depth limit to avoid scanning thousands of nodes
+    const queue = [{ node: el, depth: 0 }];
+    const maxDepth = 6;
+
+    while (queue.length > 0) {
+      const { node, depth } = queue.shift();
+      if (depth > maxDepth) continue;
+
+      for (const child of node.children) {
+        // Skip our own injected UI
+        if (child.id && child.id.startsWith("mdm-")) continue;
+
+        const style = window.getComputedStyle(child);
+        const overflowY = style.overflowY;
+
+        if (
+          (overflowY === "auto" || overflowY === "scroll") &&
+          child.scrollHeight > child.clientHeight + 50
+        ) {
+          const area = child.scrollHeight * child.clientWidth;
+          if (area > bestArea) {
+            best = child;
+            bestArea = area;
+          }
+        }
+
+        queue.push({ node: child, depth: depth + 1 });
+      }
+    }
+
+    return best;
   }
 
   ///////////////////////////////////////////////////////////////////////////
