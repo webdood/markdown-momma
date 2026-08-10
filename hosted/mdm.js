@@ -604,43 +604,41 @@
   }
 
   ///////////////////////////////////////////////////////////////////////////
-  // buildReferences - scans captured HTML for external links and formats  //
-  //                   a numbered "## References" appendix in markdown     //
+  // annotateRefs - injects ^(N) superscript marks into converted markdown //
+  //               and builds a matching numbered References appendix      //
   // ===============                                                       //
   // Collects <a href> in DOM order, dedupes by URL, keeps only HTTP(S).  //
   // Returns "" when no qualifying links found (no section appended).      //
   ///////////////////////////////////////////////////////////////////////////
 
-  function buildReferences(sHTML) {
-    let oDoc;
-    try {
-      oDoc = (new DOMParser()).parseFromString(sHTML, "text/html");
-    } catch (e) {
-      return "";
-    }
+  function annotateRefs(sMd) {
+    const oUrlToIdx = new Map();
+    const aRefs     = [];
+    let   nNext     = 1;
 
-    const aLinks  = [];
-    const oSeen   = new Set();
-    const oSkipRx = /^(javascript:|#|mailto:|tel:)/i;
+    // Match [text](url) — skip image links (preceded by !)
+    const sAnnotated = sMd.replace(
+      /(?<!!)(\[([^\]]+)\])\((https?:[^)]+)\)/g,
+      (sMatch, sBracketText, sText, sUrl) => {
+        let nIdx;
+        if (oUrlToIdx.has(sUrl)) {
+          nIdx = oUrlToIdx.get(sUrl);
+        } else {
+          nIdx = nNext++;
+          oUrlToIdx.set(sUrl, nIdx);
+          aRefs.push({ nIdx, sUrl, sLabel: sText });
+        }
+        return `[${sText}](${sUrl})^(${nIdx})`;
+      }
+    );
 
-    oDoc.querySelectorAll("a[href]").forEach(oA => {
-      const sHref = (oA.getAttribute("href") || "").trim();
-      if (!sHref || oSkipRx.test(sHref)) return;
-      if (!sHref.startsWith("http")) return;
-      if (oSeen.has(sHref)) return;
-      oSeen.add(sHref);
-      const sText = (oA.textContent || "").replace(/\s+/g, " ").trim() || sHref;
-      if (sText.length < 4) return;
-      aLinks.push({ sHref, sText });
-    });
-
-    if (aLinks.length === 0) return "";
+    if (aRefs.length === 0) return { sMd, sBlock: "" };
 
     let sBlock = "\n\n---\n\n## References\n\n";
-    aLinks.forEach((oRef, nIdx) => {
-      sBlock += `${nIdx + 1}. [${oRef.sText}](${oRef.sHref})\n`;
+    aRefs.forEach(oRef => {
+      sBlock += `${oRef.nIdx}. [${oRef.sLabel}](${oRef.sUrl})\n`;
     });
-    return sBlock;
+    return { sMd: sAnnotated, sBlock };
   }
 
   ///////////////////////////////////////////////////////////////////////////
@@ -651,8 +649,8 @@
   async function captureElement(el) {
     const html = await autoScrollAndCapture(el);
     let md = convertToMarkdown(html);
-    const sRefs = buildReferences(html);
-    if (sRefs) md += sRefs;
+    const { sMd: sMdAnnotated, sBlock: sRefsBlock } = annotateRefs(md);
+    md = sRefsBlock ? (sMdAnnotated + sRefsBlock) : md;
     buildModal(md);
   }
 
@@ -1239,6 +1237,15 @@
           text-underline-offset: 3px;
         }
 
+        sup.mdm-ref {
+          font-size: 0.72em;
+          color: #f59e0b;
+          font-weight: 700;
+          letter-spacing: -0.02em;
+          vertical-align: super;
+          line-height: 0;
+        }
+
         #mdm-preview-rendered code {
           font-family: 'JetBrains Mono', monospace;
           font-size: 0.88em;
@@ -1465,6 +1472,7 @@
     strong { color: #f0f0f0; }
     em { color: #c4b5fd; }
     a { color: #4ecdc4; text-underline-offset: 3px; }
+    sup.mdm-ref { font-size: 0.72em; color: #f59e0b; font-weight: 700; vertical-align: super; line-height: 0; }
     code {
       font-family: 'JetBrains Mono', monospace;
       font-size: 0.88em;
@@ -1505,6 +1513,24 @@
   </style>
 </head>
 <body>
+  <div class="mdm-bg-notice">
+    &#9888; To preserve background colors when printing: enable
+    <strong>Background graphics</strong> in the print dialog
+    (Chrome: More settings &rarr; Background graphics).
+    Or use the <strong>PDF</strong> button instead &mdash; colors always survive.
+  </div>
+  <style>
+    .mdm-bg-notice {
+      background: rgba(245,158,11,0.12);
+      border: 1px solid rgba(245,158,11,0.35);
+      border-radius: 8px;
+      color: #92400e;
+      font-size: 12px;
+      margin-bottom: 24px;
+      padding: 10px 14px;
+    }
+    @media print { .mdm-bg-notice { display: none; } }
+  </style>
   ${rendered}
 </body></html>`;
   }
@@ -1758,6 +1784,9 @@
 
     // Images: ![alt](src)
     out = out.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2">');
+
+    // Superscript ref marks: ^(1), ^(2a) etc — before link replacement
+    out = out.replace(/\^\((\d+[a-z]?)\)/g, '<sup class="mdm-ref">($1)</sup>');
 
     // Links: [text](url)
     out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_top">$1</a>');
