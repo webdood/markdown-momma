@@ -176,3 +176,31 @@ Inject timestamp, URL, platform into `<meta>` tags for archival purposes.
 Built by Shannon Norrell / Render Corporation  
 Project: MarkDown Momma v1.0 HTML Export Refactor  
 Date: June 11, 2026
+
+---
+
+## Open Bugs / TODOs — v1.2.x
+
+### ❌ publish.js — not working
+`node publish.js` fails. Has never successfully deployed to rendercorporation.com/mdm.
+Currently deploying by hand (FTP/SCP drop of content.js → hosted/mdm.js).
+Needs investigation: auth config, remote path, ftp vs scp selection.
+
+### ℹ️ Bookmarklet two-step load (background `<script>` injection)
+The bookmarklet creates a `<script src=...>` tag and appends it to `<head>`.
+This is standard for bookmarklets that load external libs but is NOT the
+same as a console paste. Shannon had not seen this pattern before — may be
+worth adding a plain-English note to the install page.
+
+### 🔗 Superscript references — may need tasteful icon instead of ^(N)
+`^(1)` numbers in the text may be too noisy. Consider a small neutral icon
+(e.g. ⁺ or ⬝) that links to the reference entry. Already clickable anchors
+as of v1.2.1; visual treatment TBD.
+
+### 🔍 Multiple queries per turn — what do we capture?
+When Claude runs several web searches for a single response turn, ALL result
+links present in the DOM at capture time are included in annotateRefs().
+However, the QUERY TEXT ("Searched for X") lives in collapsed tool-use
+blocks that may not expose their inner text via innerText/textContent.
+Currently only the citations/source links are captured, not the query labels.
+Future: expand tool-use blocks before capture, or parse their data-* attrs.

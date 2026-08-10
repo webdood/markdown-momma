@@ -1239,11 +1239,22 @@
 
         sup.mdm-ref {
           font-size: 0.72em;
-          color: #f59e0b;
           font-weight: 700;
           letter-spacing: -0.02em;
           vertical-align: super;
           line-height: 0;
+        }
+        sup.mdm-ref a.mdm-cite {
+          color: #f59e0b;
+          text-decoration: none;
+          transition: color 0.15s;
+        }
+        sup.mdm-ref a.mdm-cite:hover { color: #fbbf24; text-decoration: underline; }
+        /* References section target highlight */
+        li[id^="mdm-ref-"]:target {
+          background: rgba(245,158,11,0.12);
+          border-radius: 4px;
+          outline: 1px solid rgba(245,158,11,0.3);
         }
 
         #mdm-preview-rendered code {
@@ -1441,7 +1452,7 @@
   // Used for Print and PDF export so they look great, not raw text.       //
   ///////////////////////////////////////////////////////////////////////////
 
-  function getRenderedPageHTML(md, title) {
+  function getRenderedPageHTML(md, title, bForPDF) {
     const rendered = renderMarkdown(md);
     return `<!DOCTYPE html>
 <html><head>
@@ -1510,27 +1521,28 @@
       h1   { font-size: 20px; }
       h2   { font-size: 16px; }
     }
+    /* Print-to-paper: strip dark background so ink isn't wasted.       */
+    /* PDF path skips this block via a JS-injected class on <html>.     */
+    html:not(.mdm-pdf) body,
+    html:not(.mdm-pdf) pre,
+    html:not(.mdm-pdf) pre code,
+    html:not(.mdm-pdf) blockquote,
+    html:not(.mdm-pdf) th,
+    html:not(.mdm-pdf) td {
+      background: initial !important;
+      background-color: initial !important;
+    }
+    html:not(.mdm-pdf) body  { color: #1a1a1a !important; }
+    html:not(.mdm-pdf) h1    { color: #d63060 !important; border-color: #d63060 !important; }
+    html:not(.mdm-pdf) h2    { color: #1a8a7a !important; }
+    html:not(.mdm-pdf) h3    { color: #5b3ea8 !important; }
+    html:not(.mdm-pdf) a     { color: #1a5f7a !important; }
+    html:not(.mdm-pdf) code  { background: #f4f4f5 !important; color: #333 !important; }
+    html:not(.mdm-pdf) pre   { border: 1px solid #ddd !important; }
+    html:not(.mdm-pdf) sup.mdm-ref a { color: #b45309 !important; }
   </style>
 </head>
 <body>
-  <div class="mdm-bg-notice">
-    &#9888; To preserve background colors when printing: enable
-    <strong>Background graphics</strong> in the print dialog
-    (Chrome: More settings &rarr; Background graphics).
-    Or use the <strong>PDF</strong> button instead &mdash; colors always survive.
-  </div>
-  <style>
-    .mdm-bg-notice {
-      background: rgba(245,158,11,0.12);
-      border: 1px solid rgba(245,158,11,0.35);
-      border-radius: 8px;
-      color: #92400e;
-      font-size: 12px;
-      margin-bottom: 24px;
-      padding: 10px 14px;
-    }
-    @media print { .mdm-bg-notice { display: none; } }
-  </style>
   ${rendered}
 </body></html>`;
   }
@@ -1576,8 +1588,10 @@
       showToast("Pop-up blocked! Please allow pop-ups for this site.");
       return;
     }
-    pdfWin.document.write(getRenderedPageHTML(md, filename));
+    pdfWin.document.write(getRenderedPageHTML(md, filename, true));
     pdfWin.document.close();
+    // Add class AFTER close() so the document is fully parsed
+    pdfWin.document.documentElement.classList.add('mdm-pdf');
     pdfWin.focus();
     setTimeout(() => pdfWin.print(), 800);
   }
@@ -1652,6 +1666,17 @@
   ///////////////////////////////////////////////////////////////////////////
 
   function renderMarkdown(md) {
+    // Post-process: if a ## References section exists, inject id attrs
+    // into its <li> items so superscript anchors can jump to them.
+    // We do this AFTER the full render via a tiny DOM walk on the result.
+    function injectRefIds(sHtml) {
+      // Find the References <ol> or <li> block after the last <h2>References
+      let nRefH = sHtml.lastIndexOf('<h2>References</h2>');
+      if (nRefH === -1) return sHtml;
+      let nIdx = 1;
+      return sHtml.slice(0, nRefH) +
+        sHtml.slice(nRefH).replace(/<li>/g, () => `<li id="mdm-ref-${nIdx++}">`);
+    }
     let html = "";
     const lines = md.split("\n");
     let i = 0;
@@ -1771,7 +1796,7 @@
 
     if (inList) html += `</${listTag}>`;
 
-    return html;
+    return injectRefIds(html);
   }
 
   ///////////////////////////////////////////////////////////////////////////
@@ -1786,7 +1811,8 @@
     out = out.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2">');
 
     // Superscript ref marks: ^(1), ^(2a) etc — before link replacement
-    out = out.replace(/\^\((\d+[a-z]?)\)/g, '<sup class="mdm-ref">($1)</sup>');
+    out = out.replace(/\^\((\d+[a-z]?)\)/g,
+      (m, n) => `<sup class="mdm-ref"><a href="#mdm-ref-${n}" class="mdm-cite">(${n})</a></sup>`);
 
     // Links: [text](url)
     out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_top">$1</a>');
