@@ -604,13 +604,55 @@
   }
 
   ///////////////////////////////////////////////////////////////////////////
+  // buildReferences - scans captured HTML for external links and formats  //
+  //                   a numbered "## References" appendix in markdown     //
+  // ===============                                                       //
+  // Collects <a href> in DOM order, dedupes by URL, keeps only HTTP(S).  //
+  // Returns "" when no qualifying links found (no section appended).      //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function buildReferences(sHTML) {
+    let oDoc;
+    try {
+      oDoc = (new DOMParser()).parseFromString(sHTML, "text/html");
+    } catch (e) {
+      return "";
+    }
+
+    const aLinks  = [];
+    const oSeen   = new Set();
+    const oSkipRx = /^(javascript:|#|mailto:|tel:)/i;
+
+    oDoc.querySelectorAll("a[href]").forEach(oA => {
+      const sHref = (oA.getAttribute("href") || "").trim();
+      if (!sHref || oSkipRx.test(sHref)) return;
+      if (!sHref.startsWith("http")) return;
+      if (oSeen.has(sHref)) return;
+      oSeen.add(sHref);
+      const sText = (oA.textContent || "").replace(/\s+/g, " ").trim() || sHref;
+      if (sText.length < 4) return;
+      aLinks.push({ sHref, sText });
+    });
+
+    if (aLinks.length === 0) return "";
+
+    let sBlock = "\n\n---\n\n## References\n\n";
+    aLinks.forEach((oRef, nIdx) => {
+      sBlock += `${nIdx + 1}. [${oRef.sText}](${oRef.sHref})\n`;
+    });
+    return sBlock;
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
   // captureElement - grabs content (with auto-scroll), converts, shows    //
   // ==============                                                        //
   ///////////////////////////////////////////////////////////////////////////
 
   async function captureElement(el) {
     const html = await autoScrollAndCapture(el);
-    const md = convertToMarkdown(html);
+    let md = convertToMarkdown(html);
+    const sRefs = buildReferences(html);
+    if (sRefs) md += sRefs;
     buildModal(md);
   }
 
@@ -675,6 +717,12 @@
       const src = img.getAttribute("src") || "";
 
       if (img.naturalWidth < 3 && img.naturalHeight < 3) {
+        img.remove();
+        continue;
+      }
+
+      // Skip decorative chrome: logos, nav icons, favicons, etc.
+      if (isDecorativeImage(img)) {
         img.remove();
         continue;
       }
@@ -779,10 +827,16 @@
       }
     });
 
+    // Preserve <cite> content — strip the wrapper, keep the text
+    td.addRule("citations", {
+      filter: "cite",
+      replacement: (content) => content
+    });
+
     td.addRule("stripNoise", {
       filter: (node) => {
         const tag = node.nodeName.toLowerCase();
-        return ["button", "nav", "footer", "svg", "iframe", "script", "style", "noscript"].includes(tag);
+        return ["button", "nav", "header", "aside", "footer", "svg", "iframe", "script", "style", "noscript"].includes(tag);
       },
       replacement: () => ""
     });
@@ -1309,6 +1363,39 @@
         #mdm-preview-wrap::-webkit-scrollbar-thumb:hover {
           background: rgba(255,255,255,0.2);
         }
+
+        /* ---- PRINT — preserve dark theme when Ctrl+P from claude.ai ---- */
+        @media print {
+          #mdm-backdrop { display: none !important; }
+          #mdm-modal {
+            position: static !important;
+            width: 100% !important;
+            height: auto !important;
+            transform: none !important;
+            overflow: visible !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            background: #1a1a2e !important;
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+          }
+          #mdm-topbar  { display: none !important; }
+          #mdm-footer  { display: none !important; }
+          #mdm-toast   { display: none !important; }
+          #mdm-preview-wrap {
+            overflow: visible !important;
+            max-height: none !important;
+            height: auto !important;
+            padding: 24px 32px !important;
+          }
+          #mdm-preview-rendered { display: block !important; }
+          #mdm-preview-raw      { display: none  !important; }
+          #mdm-preview-rendered h1 { color: #ff6b95 !important; }
+          #mdm-preview-rendered h2 { color: #4ecdc4 !important; }
+          #mdm-preview-rendered h3 { color: #a78bfa !important; }
+          #mdm-preview-rendered pre { background: rgba(0,0,0,0.4) !important; }
+          #mdm-preview-rendered code { background: rgba(255,255,255,0.08) !important; }
+        }
       </style>
 
       <div id="mdm-backdrop"></div>
@@ -1355,55 +1442,65 @@
   <title>${escapeHTML(title)}</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&family=DM+Sans:ital,wght@0,400;0,500;0,700;1,400&display=swap');
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
       max-width: 820px;
       margin: 40px auto;
-      padding: 0 24px;
-      line-height: 1.75;
-      color: #1a1a1a;
+      padding: 0 32px 60px;
+      line-height: 1.8;
+      color: #d4d4d8;
+      background: #1a1a2e;
       font-size: 15px;
+      /* Force background colour through print-to-PDF */
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
     }
-    h1 { font-size: 26px; margin: 32px 0 12px; border-bottom: 2px solid #eee; padding-bottom: 8px; }
-    h2 { font-size: 21px; margin: 28px 0 10px; color: #333; }
-    h3 { font-size: 17px; margin: 24px 0 8px; color: #444; }
+    h1 { font-size: 26px; font-weight: 700; color: #ff6b95; margin: 36px 0 12px;
+         border-bottom: 1px solid rgba(255,107,149,0.2); padding-bottom: 8px; }
+    h2 { font-size: 21px; font-weight: 700; color: #4ecdc4; margin: 28px 0 10px; }
+    h3 { font-size: 17px; font-weight: 700; color: #a78bfa; margin: 22px 0 8px; }
+    h4, h5, h6 { font-size: 15px; font-weight: 700; color: #e0e0e0; margin: 18px 0 6px; }
     p { margin: 0 0 14px; }
+    strong { color: #f0f0f0; }
+    em { color: #c4b5fd; }
+    a { color: #4ecdc4; text-underline-offset: 3px; }
     code {
       font-family: 'JetBrains Mono', monospace;
       font-size: 0.88em;
-      background: #f4f4f5;
+      background: rgba(255,255,255,0.08);
       padding: 2px 6px;
       border-radius: 4px;
+      color: #e0c3fc;
     }
     pre {
-      background: #f8f8fa;
-      border: 1px solid #e8e8ec;
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.08);
       border-radius: 8px;
       padding: 16px 20px;
       overflow-x: auto;
       margin: 16px 0;
     }
-    pre code { background: none; padding: 0; font-size: 13px; line-height: 1.6; }
+    pre code { background: none; padding: 0; font-size: 13px; line-height: 1.6; color: #d4d4d8; }
     blockquote {
-      border-left: 3px solid #ccc;
+      border-left: 3px solid #ff6b95;
       margin: 14px 0;
       padding: 8px 16px;
-      color: #666;
+      background: rgba(255,107,149,0.06);
+      color: #bbb;
     }
     ul, ol { padding-left: 24px; margin: 8px 0 14px; }
     li { margin-bottom: 6px; }
-    hr { border: none; border-top: 1px solid #ddd; margin: 24px 0; }
+    hr { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 28px 0; }
     img { max-width: 100%; border-radius: 6px; margin: 12px 0; }
     table { border-collapse: collapse; width: 100%; margin: 14px 0; }
-    th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
-    th { background: #f4f4f5; font-weight: 600; }
-    a { color: #2563eb; }
+    th, td { border: 1px solid rgba(255,255,255,0.1); padding: 8px 12px; text-align: left; }
+    th { background: rgba(255,255,255,0.06); font-weight: 600; color: #e0e0e0; }
     @media print {
-      body { margin: 20px; font-size: 12px; line-height: 1.5; }
-      pre { font-size: 10px; }
-      h1 { font-size: 20px; }
-      h2 { font-size: 16px; }
+      body { margin: 16px; font-size: 12px; }
+      pre  { font-size: 10px; }
+      h1   { font-size: 20px; }
+      h2   { font-size: 16px; }
     }
   </style>
 </head>
@@ -1476,6 +1573,48 @@
       }
       resolve(drawToDataURI(imgEl));
     });
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // isDecorativeImage - returns true if an img is UI chrome and should   //
+  //                     be excluded from the captured markdown output     //
+  // =================                                                     //
+  // Guards (evaluated on the clone — attributes/tree are preserved):     //
+  //   ancestor tag is header|footer|nav|aside                            //
+  //   self or ancestor has aria-hidden=true                              //
+  //   role=presentation or role=none                                     //
+  //   no alt text AND intrinsic/attribute size < 64 px                  //
+  //   src path matches logo|icon|avatar|badge|favicon|sprite|pixel       //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function isDecorativeImage(oImg) {
+    // --- Ancestor semantic tag check (works in detached clone) -----------
+    const oSkip = { header: 1, footer: 1, nav: 1, aside: 1 };
+    let oAnc = oImg.parentElement;
+    while (oAnc) {
+      const sTag = oAnc.tagName ? oAnc.tagName.toLowerCase() : "";
+      if (oSkip[sTag]) return true;
+      if (oAnc.getAttribute && oAnc.getAttribute("aria-hidden") === "true") return true;
+      oAnc = oAnc.parentElement;
+    }
+
+    // --- Self attribute checks -------------------------------------------
+    if (oImg.getAttribute("aria-hidden") === "true") return true;
+    const sRole = oImg.getAttribute("role") || "";
+    if (sRole === "presentation" || sRole === "none") return true;
+
+    // --- Alt text + size check ------------------------------------------
+    const sAlt = (oImg.getAttribute("alt") || "").trim();
+    const nW   = oImg.naturalWidth  || parseInt(oImg.getAttribute("width")  || "0", 10);
+    const nH   = oImg.naturalHeight || parseInt(oImg.getAttribute("height") || "0", 10);
+    if (!sAlt && nW > 0 && nW < 64 && nH > 0 && nH < 64) return true;
+
+    // --- src path pattern check -----------------------------------------
+    const sSrc = (oImg.getAttribute("src") || "").toLowerCase();
+    if (/\/(logo|icon|avatar|badge|favicon|sprite|placeholder|pixel|spacer|close)/.test(sSrc)) return true;
+    if (/\.ico(\?|#|$)/.test(sSrc)) return true;
+
+    return false;
   }
 
   ///////////////////////////////////////////////////////////////////////////
