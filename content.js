@@ -2002,13 +2002,17 @@
     // --- 2b. Response action bar (copy / share / thumbs / more). Container
     //         is hash-classed; the buttons carry stable aria-labels. Remove
     //         the smallest ancestor that holds the thumbs pair and no content.
+    //         Reply bodies always carry strong/code/lists/headings; the bar
+    //         and its footer (disclaimer, feedback form) carry none, so
+    //         "content-free" is the stop condition. Text-length cap as belt.
+    const sContent = "p,pre,code,strong,em,ul,ol,table,img,blockquote,h1,h2,h3,h4,h5,h6,[role='heading']";
     oClone.querySelectorAll("[aria-label='Good response']").forEach(oUp => {
-      let n = oUp.parentElement;
-      for (let k = 0; n && k < 8; k++, n = n.parentElement) {
-        if (!n.querySelector("[aria-label='Bad response']")) continue;
-        if (n.querySelector("p, pre, h1, h2, h3, h4, ul, ol, table, img")) break;   // too wide
-        n.remove(); break;
+      let oBest = null, n = oUp.parentElement;
+      for (let k = 0; n && n !== oClone && k < 10; k++, n = n.parentElement) {
+        if (n.querySelector(sContent) || n.textContent.length > 2000) break;
+        if (n.querySelector("[aria-label='Bad response']")) oBest = n;
       }
+      if (oBest) oBest.remove();
     });
 
     // --- 3b. Corroboration side panel: titles are harvested above; the
