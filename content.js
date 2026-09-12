@@ -1999,6 +1999,16 @@
       }
     });
 
+    // --- 2a. Google component-library overlays/controls. Tag names are the
+    //         library's API (stable), unlike its hashed class names. Menus
+    //         and popups render lazily, so they only appear if open at
+    //         capture time — cheap insurance either way.
+    oClone.querySelectorAll(
+      "g-popup, g-menu, g-menu-item, g-dialog, g-dialog-content, g-snackbar, g-tooltip, " +
+      "g-bubble, g-dropdown-menu, g-dropdown-button, g-fab, g-raised-button, g-flat-button, " +
+      "g-loading-icon, g-more-link, g-scrolling-carousel"
+    ).forEach(n => n.remove());
+
     // --- 2b. Response footer: action bar (copy / share / thumbs / more),
     //         disclaimer, feedback survey, "Try without personalization".
     //         Container is hash-classed. Seed on any footer signature, then
