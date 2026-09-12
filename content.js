@@ -904,7 +904,10 @@
     flattenShadowRoots(el);
 
     const clone = el.cloneNode(true);
-    if (isGoogleAIMode()) prepGoogleAIClone(el, clone);
+    // Order matters: prepGoogleAIClone's hidden-node prune walks live and
+    // clone index-parallel, so it must see an UNMODIFIED clone. Ad prune after.
+    if (isGoogleAIMode()) prepGoogleAIClone(el, clone);   // Google AI Mode only
+    pruneAdMarkup(clone);                                  // all providers
     const images = clone.querySelectorAll("img");
     const total = images.length;
 
@@ -1916,16 +1919,39 @@
   function prepGoogleAIClone(oLive, oClone) {
     oRefTitles.clear();
 
-    // --- 1. Hidden-node prune (parallel walk; clone mirrors live order) --
+    // --- 1. Hidden-node prune — MUST run first: index-parallel walk needs
+    //        the clone untouched so it mirrors the live tree exactly
     const aL = oLive.querySelectorAll("*");
     const aC = oClone.querySelectorAll("*");
-    if (aL.length === aC.length) {
+    if (aL.length !== aC.length) {
+      console.warn(`[MDM] hidden-node prune skipped: live ${aL.length} vs clone ${aC.length} nodes (clone mutated before prune?)`);
+    } else {
       for (let i = 0; i < aL.length; i++) {
         const l = aL[i];
         if (l.getAttribute("aria-hidden") === "true") { aC[i].remove(); continue; }
         const cs = window.getComputedStyle(l);
         if (cs.display === "none" || cs.visibility === "hidden") aC[i].remove();
       }
+    }
+
+    // --- 1b. Turn allowlist: a direct child of the thread root is kept only
+    //        if it looks like a turn (user prompt or AI reply). Anything
+    //        else sitting between turns — ad unit, promo card, upsell — is
+    //        dropped without needing to know what it is. Inverted rule:
+    //        denylists grow forever; the turn signature does not.
+    //        Only applied when the root IS the thread (data-xid marker) so a
+    //        manual picker selection of some inner element is left alone.
+    if (oClone.getAttribute("data-xid") === "aim-mars-turn-root") {
+      const isTurn = (n) =>
+        n.querySelector("[role='heading'][aria-level='2'], h2, h3") !== null ||
+        /You said:|AI Mode reply for/i.test(n.textContent);
+      let nDropped = 0;
+      [...oClone.children].forEach(n => {
+        if (n.tagName === "SCRIPT" || n.tagName === "STYLE") { n.remove(); return; }
+        if (!n.textContent.trim()) return;          // empty shells are harmless
+        if (!isTurn(n)) { n.remove(); nDropped++; }
+      });
+      if (nDropped) console.log(`[MDM] Google AI turn allowlist: dropped ${nDropped} non-turn block(s)`);
     }
 
     // --- 2. Semantic chrome ---------------------------------------------
@@ -1989,6 +2015,29 @@
       if (!code) { code = document.createElement("code"); code.textContent = pre.textContent; pre.textContent = ""; pre.appendChild(code); }
       if (sLang) code.className = "language-" + sLang;
     });
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // pruneAdMarkup - removes advertising units by the markers ads carry   //
+  // =============                                                         //
+  // Cross-provider, marker-based, deliberately small. Ads must be        //
+  // labelled for regulatory reasons, so the labels are stable even when  //
+  // the surrounding class names are not. Runs on the clone.              //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function pruneAdMarkup(oClone) {
+    const sSel = [
+      "iframe", "ins.adsbygoogle", "amp-ad",
+      "[data-text-ad]", "[data-ad-slot]", "[data-ad-client]", "[data-ad]",
+      "[data-google-query-id]", "[id^='google_ads_']", "[id^='div-gpt-ad']",
+      "#tads", "#tadsb", "#bottomads", ".ads-ad",
+      "[aria-label='Ad']", "[aria-label='Ads']", "[aria-label='Sponsored']",
+      "[aria-label^='Ad ']", "[aria-label^='Sponsored ']",
+      "[data-sponsored]", "[data-promo]"
+    ].join(",");
+    let nRemoved = 0;
+    oClone.querySelectorAll(sSel).forEach(n => { n.remove(); nRemoved++; });
+    if (nRemoved) console.log(`[MDM] pruneAdMarkup: removed ${nRemoved} ad node(s)`);
   }
 
   ///////////////////////////////////////////////////////////////////////////
