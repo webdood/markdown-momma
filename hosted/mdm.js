@@ -95,16 +95,20 @@
     {
       name: "Google AI (Search)",
       hostPattern: /www\.google\.com|google\.com/,
-      // Only trigger when AI params are present in the URL
-      urlPattern: /[?&](aioh|udm=50|atvm)/,
+      // aioh=1 is the definitive AI Mode indicator; udm=50 is a fallback
+      urlPattern: /[?&](aioh=1|udm=50)/,
       selectors: [
-        "[data-attrid='wa:/summary']",
-        "div[jsname] div[data-q]",
-        "[data-md]",
+        // AI Mode conversation thread — ordered most-specific to broadest
+        "[data-async-id='air_answers']",      // async AI answers container
+        "air-answer",                          // custom element (some builds)
+        "div[data-q]",                         // per-turn Q&A wrappers
+        "[jscontroller][data-hveid]",          // AI result cards
+        "[data-attrid='wa:/summary']",         // AI Overview summary
+        "[data-md]",                           // markdown-rendered AI block
         "div[class*='ai-overview']",
         "div[class*='AiOverview']",
-        "#rso div[data-attrid]",
-        "#center_col"
+        "#rcnt",                               // full result container (narrow)
+        "#center_col"                          // broadest fallback
       ]
     }
   ];
@@ -604,6 +608,85 @@
   }
 
   ///////////////////////////////////////////////////////////////////////////
+  // cleanGoogleAI - strips Google AI Mode UI chrome from converted md   //
+  // =============                                                        //
+  // Removes: tab nav, share dialogs, feedback buttons, sidebar history, //
+  // input bar, duplicated source card blocks, privacy boilerplate.      //
+  // Called only on google.com captures (detected by hostname).          //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function cleanGoogleAI(sMd) {
+    // ── Line-level noise patterns ───────────────────────────────────────
+    const aDropLine = [
+      // Feedback / share UI
+      /^(Good response|Bad response|More)$/i,
+      /^Copied?(Failed to copy)?Copy?$/i,
+      /^CopiedFailed to copyCopy$/i,
+      /^Copied to clipboard/i,
+      /^Failed to copy to clipboard/i,
+      /^A copy of this chat (and the content you shared )?will be included\.?$/i,
+      /^Thanks for letting us know$/i,
+      /^Google may use account/i,
+      /^For legal issues, make a legal removal request\.?$/i,
+      /^AI responses may include mistakes\./i,
+      // Share dialog
+      /^Share public link$/i,
+      /^This public link shares a thread/i,
+      /^You can delete this link/i,
+      /^Can't copy the link right now/i,
+      /^(Facebook|Gmail|X|Reddit|WhatsApp)$/,
+      /^\[?(Facebook|Gmail|X|Reddit|WhatsApp|Share)\]?(\(https?:)?/,
+      // Source card duplicates / show-more UI
+      /^Show (less|all)$/i,
+      /^Shared$/i,
+      /^\d+ files?$/i,
+      // Sidebar / navigation chrome
+      /^Open sidebar$/i,
+      /^Close sidebar$/i,
+      /^New thread$/i,
+      /^See your Search history$/i,
+      /^AI Mode history$/i,
+      /^Personalization$/i,
+      /^Settings$/i,
+      /^Notebooks?$/i,
+      /^Untitled notebook$/i,
+      /^Recent$/i,
+      /^More options$/i,
+      // Input bar
+      /^(Microphone|Stop|Retry|Send|Transcribing\.*)$/i,
+      /^Add files, tools/i,
+      /^Ask about$/i,
+      /^My Ad Center$/i,
+      // Search tab nav (the link list at the top)
+      /^\[?(All|Videos|Forums|Images|Shopping|Short videos|News|Web|Books|Maps|Pro)\]?(\(\/search|\(https)/i,
+      // Repeated "Use code with caution." (keep first, strip dupes later)
+      /^Use code with caution\.?$/i,
+    ];
+
+    const aLines  = sMd.split('\n');
+    const aOut    = [];
+    let   bInShare = false;  // inside a share-dialog block
+
+    for (let i = 0; i < aLines.length; i++) {
+      const sLine    = aLines[i];
+      const sTrimmed = sLine.trim();
+
+      // Multi-line share-dialog block: "Share\nGood response\n..."
+      if (/^Share$/i.test(sTrimmed)) { bInShare = true; continue; }
+      if (bInShare) {
+        if (/^(Good response|##|You said:)/i.test(sTrimmed) || sTrimmed === '') bInShare = false;
+        else continue;
+      }
+
+      if (aDropLine.some(rx => rx.test(sTrimmed))) continue;
+      aOut.push(sLine);
+    }
+
+    // ── Collapse 3+ blank lines → 2 ─────────────────────────────────────
+    return aOut.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
   // annotateRefs - injects ^(N) superscript marks into converted markdown //
   //               and builds a matching numbered References appendix      //
   // ===============                                                       //
@@ -649,6 +732,12 @@
   async function captureElement(el) {
     const html = await autoScrollAndCapture(el);
     let md = convertToMarkdown(html);
+
+    // Google AI Mode: strip UI chrome before annotating refs
+    if (/google\.com/.test(window.location.hostname)) {
+      md = cleanGoogleAI(md);
+    }
+
     const { sMd: sMdAnnotated, sBlock: sRefsBlock } = annotateRefs(md);
     md = sRefsBlock ? (sMdAnnotated + sRefsBlock) : md;
     buildModal(md);
@@ -834,7 +923,11 @@
     td.addRule("stripNoise", {
       filter: (node) => {
         const tag = node.nodeName.toLowerCase();
-        return ["button", "nav", "header", "aside", "footer", "svg", "iframe", "script", "style", "noscript"].includes(tag);
+        // Also strip Google AI Mode chrome elements by aria-label / data attrs
+      const sLabel = (node.getAttribute && node.getAttribute("aria-label") || "").toLowerCase();
+      if (/share|feedback|good response|bad response|copy link|sidebar|history/i.test(sLabel)) return true;
+      if (node.getAttribute && node.getAttribute("data-async-id") === "ftr") return true;  // Google footer
+      return ["button", "nav", "header", "aside", "footer", "svg", "iframe", "script", "style", "noscript"].includes(tag);
       },
       replacement: () => ""
     });
