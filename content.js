@@ -1999,20 +1999,27 @@
       }
     });
 
-    // --- 2b. Response action bar (copy / share / thumbs / more). Container
-    //         is hash-classed; the buttons carry stable aria-labels. Remove
-    //         the smallest ancestor that holds the thumbs pair and no content.
-    //         Reply bodies always carry strong/code/lists/headings; the bar
-    //         and its footer (disclaimer, feedback form) carry none, so
-    //         "content-free" is the stop condition. Text-length cap as belt.
-    const sContent = "p,pre,code,strong,em,ul,ol,table,img,blockquote,h1,h2,h3,h4,h5,h6,[role='heading']";
-    oClone.querySelectorAll("[aria-label='Good response']").forEach(oUp => {
-      let oBest = null, n = oUp.parentElement;
-      for (let k = 0; n && n !== oClone && k < 10; k++, n = n.parentElement) {
-        if (n.querySelector(sContent) || n.textContent.length > 2000) break;
-        if (n.querySelector("[aria-label='Bad response']")) oBest = n;
+    // --- 2b. Response footer: action bar (copy / share / thumbs / more),
+    //         disclaimer, feedback survey, "Try without personalization".
+    //         Container is hash-classed. Seed on any footer signature, then
+    //         climb only while the text an ancestor ADDS is pure chrome —
+    //         so the walk can never swallow reply prose, however short.
+    const norm     = (t) => (t || "").replace(/\s+/g, " ").trim();
+    const rxChrome = /^(?:Copied to clipboard|Failed to copy to clipboard\.?|Try again later\.?|Copied|Failed to copy|Copy(?: text)?|Share|Good response|Bad response|More|Export to Docs|Draft in Gmail|About this response|Close(?: menu)?|Try without personalization|AI responses may include mistakes\.?|For legal advice, consult a professional\.?|Learn more|Helpful|Unhelpful|Other|Submit|Skip|[\s.·,]+)*$/i;
+    const aSeeds = [
+      ...oClone.querySelectorAll("[aria-label='Good response']"),
+      ...[...oClone.querySelectorAll("*")].filter(x => x.children.length === 0 &&
+           /^(AI responses may include mistakes|Try without personalization)/i.test(norm(x.textContent)))
+    ];
+    aSeeds.forEach(oSeed => {
+      if (!oClone.contains(oSeed)) return;                 // already removed via a sibling seed
+      let oBest = oSeed, n = oSeed.parentElement;
+      for (let k = 0; n && n !== oClone && k < 12; k++, n = n.parentElement) {
+        const sDelta = norm(n.textContent).replace(norm(oBest.textContent), "");
+        if (!rxChrome.test(sDelta)) break;
+        oBest = n;
       }
-      if (oBest) oBest.remove();
+      oBest.remove();
     });
 
     // --- 3b. Corroboration side panel: titles are harvested above; the
