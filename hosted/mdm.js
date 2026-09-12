@@ -2035,8 +2035,15 @@
     // --- 3b. Corroboration side panel: titles are harvested above; the
     //         panel itself duplicates the inline citations and renders as a
     //         floating column (wide whitespace in export). Delete it.
-    oClone.querySelectorAll("[data-xid*='corroboration'], [data-xid*='aside']")
-      .forEach(n => n.remove());
+    oClone.querySelectorAll("[data-xid*='corroboration'], [data-xid*='aside'], .junction, [class*='junction']")
+      .forEach(n => {
+        // Guard: never remove a wrapper that carries reply prose
+        if (n.querySelector("h1,h2,h3,[role='heading'],pre,code,strong,a[aria-label*='Related results']")) {
+          console.warn("[MDM] side-panel candidate skipped — contains reply prose:", n.className || n.getAttribute("data-xid"));
+          return;
+        }
+        n.remove();
+      });
 
     // --- 4. Headings --------------------------------------------------
     oClone.querySelectorAll("[role='heading']").forEach(h => {
