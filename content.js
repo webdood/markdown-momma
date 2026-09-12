@@ -162,7 +162,8 @@
       for (const sel of site.selectors) {
         try {
           const el = document.querySelector(sel);
-          if (el && el.innerText.trim().length > 100) {
+          // Skip zero-height elements (visible in DOM but not rendered content)
+          if (el && el.offsetHeight > 0 && el.innerText.trim().length > 100) {
             // Run the scorer to see if this is actually a good pick
             const score = scoreConversationNode(el);
             if (score > 0) {
