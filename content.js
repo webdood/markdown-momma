@@ -125,6 +125,7 @@
   let modalContainer = null;
   let progressEl = null;
   let previewMode = "rendered"; // "rendered" or "raw"
+  const oRefTitles = new Map();  // url -> descriptive title (Google AI aria-labels)
 
   // =========================================================================
   // METHODS (alphabetical)
@@ -734,6 +735,7 @@
     const aIn  = sMd.split("\n");
     const aOut = [];
     let   oSeenCards = new Set();      // per-turn dedupe of source cards
+    let   nTitleAt   = -1;             // index of the conversation H1 in aOut
     const lastNonEmpty = () => { for (let j = aOut.length - 1; j >= 0; j--) if (aOut[j].trim()) return j; return -1; };
 
     for (let i = 0; i < aIn.length; i++) {
@@ -742,8 +744,9 @@
       if (aDrop.some(rx => rx.test(t))) continue;
       let m;
 
-      // Conversation title → H1
+      // Conversation title → H1 (remember where, for the pre-title strip)
       if ((m = t.match(/^(#+\s*)?AI Mode Conversation:\s*(.+)$/i))) {
+        nTitleAt = aOut.length;
         aOut.push(`# ${m[2].trim()}`, ""); continue;
       }
 
@@ -790,9 +793,9 @@
       aOut.push(s);
     }
 
-    // Anything above the conversation H1 is sidebar/nav that slipped through
-    const nH1 = aOut.findIndex(l => /^# /.test(l));
-    if (nH1 > 0) aOut.splice(0, nH1);
+    // Anything above the conversation title is sidebar/nav that slipped through
+    // (only when we actually saw the title — never match '# ' inside code)
+    if (nTitleAt > 0) aOut.splice(0, nTitleAt);
 
     return aOut.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   }
@@ -824,7 +827,7 @@
         } else {
           nIdx = nNext++;
           oUrlToIdx.set(sUrl, nIdx);
-          aRefs.push({ nIdx, sUrl, sLabel: sText });
+          aRefs.push({ nIdx, sUrl, sLabel: oRefTitles.get(sUrl) || sText });
         }
         return `[${sText}](${sUrl})^(${nIdx})`;
       }
@@ -901,6 +904,7 @@
     flattenShadowRoots(el);
 
     const clone = el.cloneNode(true);
+    if (isGoogleAIMode()) prepGoogleAIClone(el, clone);
     const images = clone.querySelectorAll("img");
     const total = images.length;
 
@@ -995,7 +999,13 @@
         if (node.nodeName === "PRE") {
           const code = node.querySelector("code");
           const text = (code || node).textContent;
-          return "\n\n```\n" + text.trim() + "\n```\n\n";
+          // Preserve fence info string from class="language-x" / lang-x
+          // (on <code> or <pre>) or data-language= — all providers
+          const sCls = ((code && code.className) || "") + " " + (node.className || "");
+          const m    = sCls.match(/(?:^|\s)(?:language|lang)-([A-Za-z0-9+#.-]+)/);
+          const sLang = (m && m[1]) || node.getAttribute("data-language") ||
+                        (code && code.getAttribute("data-language")) || "";
+          return "\n\n```" + sLang.toLowerCase() + "\n" + text.trim() + "\n```\n\n";
         }
         return content;
       }
@@ -1882,6 +1892,103 @@
            !/^gemini\./i.test(h) &&
            /^\/search/.test(window.location.pathname) &&
            /[?&](aioh=1|udm=50)\b/.test(window.location.href);
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // prepGoogleAIClone - DOM-level cleanup of a Google AI Mode capture     //
+  // =================                                                     //
+  // Runs on the CLONE, using the LIVE element for computed visibility.   //
+  // Evidence-based (full page dump, Sep 2026):                            //
+  //   1. drop nodes that are display:none / visibility:hidden / aria-    //
+  //      hidden — Turndown can't see CSS, so hidden DOM otherwise leaks  //
+  //   2. drop semantic chrome by ARIA role: dialog (share/about), status //
+  //      + alert (copy toasts), progressbar, textbox (input plate),      //
+  //      tooltip, menu, non-anchor buttons (Show all / More / feedback)  //
+  //   3. citations are <a> with EMPTY text and a descriptive aria-label; //
+  //      set visible text to the host and harvest the title for the     //
+  //      References appendix via oRefTitles                             //
+  //   4. role=heading divs → real <hN>; aria-level 2 is the user prompt  //
+  //      → <p>; first turn's <h2>You said:…</h2> → <p>                   //
+  //   5. code blocks carry a sibling language chip ("bash") → fold it   //
+  //      into <code class="language-x"> so Turndown emits ```bash        //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function prepGoogleAIClone(oLive, oClone) {
+    oRefTitles.clear();
+
+    // --- 1. Hidden-node prune (parallel walk; clone mirrors live order) --
+    const aL = oLive.querySelectorAll("*");
+    const aC = oClone.querySelectorAll("*");
+    if (aL.length === aC.length) {
+      for (let i = 0; i < aL.length; i++) {
+        const l = aL[i];
+        if (l.getAttribute("aria-hidden") === "true") { aC[i].remove(); continue; }
+        const cs = window.getComputedStyle(l);
+        if (cs.display === "none" || cs.visibility === "hidden") aC[i].remove();
+      }
+    }
+
+    // --- 2. Semantic chrome ---------------------------------------------
+    oClone.querySelectorAll(
+      "[role='dialog'],[role='status'],[role='alert'],[role='progressbar']," +
+      "[role='textbox'],[role='tooltip'],[role='menu'],[role='button']"
+    ).forEach(n => { if (n.tagName !== "A") n.remove(); });
+
+    // --- 3. Citation anchors: label + harvest titles ---------------------
+    oClone.querySelectorAll("a[href^='http']").forEach(a => {
+      const sHref = a.getAttribute("href");
+      const sAria = (a.getAttribute("aria-label") || "").trim();
+      if (a.textContent.trim() || !sAria) return;
+      let s = sAria
+        .replace(/\.?\s*(Related results|Opens in new tab\.?)\s*$/i, "")
+        .replace(/,\s*Video,\s*watch on YouTube\s*$/i, "")
+        .trim();
+      // "Site (+N) - Title" form: keep the title half
+      const m = s.match(/^(.{1,40}?)(?:\s*\(\+\d+\))?\s+-\s+(.+)$/);
+      if (m && /Related results/i.test(sAria)) s = m[2].trim();
+      const sTitle = s.replace(/\.$/, "");
+      oRefTitles.set(sHref, sTitle);
+      const sHost = (sHref.match(/^https?:\/\/([^/?#]+)/) || [, "link"])[1].replace(/^www\./, "");
+      const oCard = a.closest("[data-xid='aim-aside-initial-corroboration-container'] li, [data-xid='aim-aside-initial-corroboration-container'] [role='listitem']");
+      if (oCard) {
+        // Source card: collapse the whole card to "Title (host)" link
+        a.textContent = `${sTitle} (${sHost})`;
+        oCard.textContent = "";
+        oCard.appendChild(a);
+      } else {
+        a.textContent = sHost;             // inline citation: keep it short
+      }
+    });
+
+    // --- 4. Headings --------------------------------------------------
+    oClone.querySelectorAll("[role='heading']").forEach(h => {
+      const n = parseInt(h.getAttribute("aria-level") || "3", 10);
+      const r = document.createElement(n <= 2 ? "p" : "h" + Math.min(n, 6));
+      r.innerHTML = h.innerHTML;
+      h.replaceWith(r);
+    });
+    oClone.querySelectorAll("h2").forEach(h => {
+      if (!/^\s*You said:/i.test(h.textContent)) return;
+      const p = document.createElement("p");
+      p.textContent = h.textContent.replace(/^\s*You said:\s*/i, "");
+      h.replaceWith(p);
+    });
+
+    // --- 5. Code fence language chips ----------------------------------
+    oClone.querySelectorAll("pre").forEach(pre => {
+      let oWrap = pre.parentElement, sLang = null, oChip = null;
+      for (let k = 0; k < 3 && oWrap && !sLang; k++, oWrap = oWrap.parentElement) {
+        for (const c of oWrap.querySelectorAll("*")) {
+          if (c === pre || pre.contains(c) || c.contains(pre) || c.children.length) continue;
+          const t = c.textContent.trim();
+          if (/^[a-z0-9+#.-]{1,15}$/i.test(t)) { sLang = t.toLowerCase(); oChip = c; break; }
+        }
+      }
+      if (oChip) oChip.remove();
+      let code = pre.querySelector("code");
+      if (!code) { code = document.createElement("code"); code.textContent = pre.textContent; pre.textContent = ""; pre.appendChild(code); }
+      if (sLang) code.className = "language-" + sLang;
+    });
   }
 
   ///////////////////////////////////////////////////////////////////////////
