@@ -96,7 +96,7 @@
       name: "Google AI (Search)",
       hostPattern: /www\.google\.com|google\.com/,
       // aioh=1 is the definitive AI Mode indicator; udm=50 is a fallback
-      urlPattern: /[?&](aioh=1|udm=50)/,
+      urlPattern: /\/search\?[^#]*[?&](aioh=1|udm=50)\b/,   // keep in sync with isGoogleAIMode()
       // Google's jsname/class attributes are build-hashed and rotate on
       // every deploy, so we do NOT hardcode them. The finder locates the
       // thread structurally from the rendered turn-heading UI copy.
@@ -833,7 +833,7 @@
     let md = convertToMarkdown(html);
 
     // Google AI Mode: strip UI chrome before annotating refs
-    if (/google\.com/.test(window.location.hostname)) {
+    if (isGoogleAIMode()) {
       md = cleanGoogleAI(md);
     }
 
@@ -1014,6 +1014,8 @@
     });
 
     // Preserve <cite> content — strip the wrapper, keep the text
+    const bGoogleAI = isGoogleAIMode();   // scopes Google-only Turndown rules
+
     td.addRule("citations", {
       filter: "cite",
       replacement: (content) => content
@@ -1023,9 +1025,11 @@
       filter: (node) => {
         const tag = node.nodeName.toLowerCase();
         // Also strip Google AI Mode chrome elements by aria-label / data attrs
-      const sLabel = (node.getAttribute && node.getAttribute("aria-label") || "").toLowerCase();
-      if (/share|feedback|good response|bad response|copy link|sidebar|history/i.test(sLabel)) return true;
-      if (node.getAttribute && node.getAttribute("data-async-id") === "ftr") return true;  // Google footer
+      if (bGoogleAI) {
+        const sLabel = (node.getAttribute && node.getAttribute("aria-label") || "").toLowerCase();
+        if (/share|feedback|good response|bad response|copy link|sidebar|history/i.test(sLabel)) return true;
+        if (node.getAttribute && node.getAttribute("data-async-id") === "ftr") return true;  // Google footer
+      }
       return ["button", "nav", "header", "aside", "footer", "svg", "iframe", "script", "style", "noscript"].includes(tag);
       },
       replacement: () => ""
@@ -1847,6 +1851,21 @@
     if (/\.ico(\?|#|$)/.test(sSrc)) return true;
 
     return false;
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // isGoogleAIMode - true only on Google Search "AI Mode" result pages   //
+  // ==============                                                       //
+  // Requires /search path + aioh=1|udm=50. Excludes gemini.google.com    //
+  // (path /app) so Gemini captures never run the Google-specific cleanup //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function isGoogleAIMode() {
+    const h = window.location.hostname;
+    return /(^|\.)google\.[a-z.]+$/i.test(h) &&
+           !/^gemini\./i.test(h) &&
+           /^\/search/.test(window.location.pathname) &&
+           /[?&](aioh=1|udm=50)\b/.test(window.location.href);
   }
 
   ///////////////////////////////////////////////////////////////////////////
