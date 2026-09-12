@@ -1633,6 +1633,10 @@
           }
           #mdm-preview-rendered { display: block !important; }
           #mdm-preview-raw      { display: none  !important; }
+          /* no horizontal overflow → no shrink-to-fit */
+          #mdm-preview-rendered pre { white-space: pre-wrap !important; word-break: break-all !important; overflow: visible !important; }
+          #mdm-preview-rendered p, #mdm-preview-rendered li, #mdm-preview-rendered td { overflow-wrap: anywhere; }
+          #mdm-preview-rendered table { table-layout: fixed; max-width: 100%; }
           #mdm-preview-rendered h1 { color: #ff6b95 !important; }
           #mdm-preview-rendered h2 { color: #4ecdc4 !important; }
           #mdm-preview-rendered h3 { color: #a78bfa !important; }
@@ -1680,7 +1684,7 @@
   function getRenderedPageHTML(md, title, bForPDF) {
     const rendered = renderMarkdown(md);
     return `<!DOCTYPE html>
-<html><head>
+<html class="${bForPDF ? 'mdm-pdf' : ''}"><head>
   <meta charset="utf-8">
   <title>${escapeHTML(title)}</title>
   <style>
@@ -1740,11 +1744,22 @@
     table { border-collapse: collapse; width: 100%; margin: 14px 0; }
     th, td { border: 1px solid rgba(255,255,255,0.1); padding: 8px 12px; text-align: left; }
     th { background: rgba(255,255,255,0.06); font-weight: 600; color: #e0e0e0; }
+    /* Long unbreakable content (pasted logs, wide tables, URLs) must wrap.
+       Any element wider than the page makes Chrome shrink-to-fit the WHOLE
+       document, so text goes tiny and sits in the left third of each page. */
+    p, li, td, th, h1, h2, h3, h4, code, a { overflow-wrap: anywhere; word-break: break-word; }
+    pre { white-space: pre-wrap; word-break: break-all; overflow-wrap: anywhere; overflow: visible; max-width: 100%; }
+    table { table-layout: fixed; max-width: 100%; }
+    img, svg, video, canvas { max-width: 100%; height: auto; }
+    @page { size: auto; margin: 0.5in; }
     @media print {
-      body { margin: 16px; font-size: 12px; }
+      html, body { width: auto !important; max-width: none !important; margin: 0 !important; overflow-x: hidden !important; }
+      body { padding: 0 !important; font-size: 12px; }
       pre  { font-size: 10px; }
       h1   { font-size: 20px; }
       h2   { font-size: 16px; }
+      h1, h2, h3, h4 { break-after: avoid; }
+      pre, blockquote, table, li { break-inside: avoid; }
     }
     /* Print-to-paper: strip dark background so ink isn't wasted.       */
     /* PDF path skips this block via a JS-injected class on <html>.     */
@@ -1815,8 +1830,6 @@
     }
     pdfWin.document.write(getRenderedPageHTML(md, filename, true));
     pdfWin.document.close();
-    // Add class AFTER close() so the document is fully parsed
-    pdfWin.document.documentElement.classList.add('mdm-pdf');
     pdfWin.focus();
     setTimeout(() => pdfWin.print(), 800);
   }
