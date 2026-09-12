@@ -1999,6 +1999,12 @@
       }
     });
 
+    // --- 3b. Corroboration side panel: titles are harvested above; the
+    //         panel itself duplicates the inline citations and renders as a
+    //         floating column (wide whitespace in export). Delete it.
+    oClone.querySelectorAll("[data-xid='aim-aside-initial-corroboration-container']")
+      .forEach(n => n.remove());
+
     // --- 4. Headings --------------------------------------------------
     oClone.querySelectorAll("[role='heading']").forEach(h => {
       const n = parseInt(h.getAttribute("aria-level") || "3", 10);
