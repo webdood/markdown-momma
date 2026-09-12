@@ -270,12 +270,15 @@
     const aTurnEls = [];
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let oNode;
+    const aHidden = [];
     while ((oNode = walker.nextNode())) {
       if (!REPLY_RX.test(oNode.nodeValue)) continue;
       const oEl = oNode.parentElement;
-      if (!oEl || oEl.offsetHeight === 0) continue;   // skip hidden/aria copies
-      aTurnEls.push(oEl);
+      if (!oEl) continue;
+      (oEl.offsetHeight > 0 ? aTurnEls : aHidden).push(oEl);
     }
+    // Prefer rendered headings; fall back to sr-only copies if that's all
+    if (aTurnEls.length === 0) aTurnEls.push(...aHidden);
     if (aTurnEls.length === 0) return null;
 
     // --- 2. Lowest common ancestor of all turn elements ------------------
@@ -297,7 +300,7 @@
     //        sit below the first user question)
     let nGuard = 0;
     while (oLCA && oLCA !== document.body && nGuard++ < 12 &&
-           !PROMPT_RX.test(oLCA.innerText || "")) {
+           !PROMPT_RX.test(oLCA.textContent || "")) {   // textContent: sees sr-only copy
       oLCA = oLCA.parentElement;
     }
 
@@ -682,74 +685,100 @@
   ///////////////////////////////////////////////////////////////////////////
 
   function cleanGoogleAI(sMd) {
-    // ── Line-level noise patterns ───────────────────────────────────────
-    const aDropLine = [
-      // Feedback / share UI
-      /^(Good response|Bad response|More)$/i,
-      /^Copied?(Failed to copy)?Copy?$/i,
-      /^CopiedFailed to copyCopy$/i,
-      /^Copied to clipboard/i,
-      /^Failed to copy to clipboard/i,
-      /^A copy of this chat (and the content you shared )?will be included\.?$/i,
-      /^Thanks for letting us know$/i,
-      /^Google may use account/i,
-      /^For legal issues, make a legal removal request\.?$/i,
-      /^AI responses may include mistakes\./i,
-      // Share dialog
-      /^Share public link$/i,
-      /^This public link shares a thread/i,
-      /^You can delete this link/i,
-      /^Can't copy the link right now/i,
+    // ── Pass 1: line-level chrome to drop outright ───────────────────────
+    const aDrop = [
+      /^\[$/,                                                  // orphan "[" from block anchors
+      /^\]\((\/search\?|https?:\/\/(www\.|maps\.|accounts\.|myactivity\.)?google\.com)/, // orphan "](…google…)"
+      /^\[\]\(https?:\/\/[^)]*google\.com[^)]*\)$/,            // empty-text links into Google
+      /^\[[^\]]*\]\(https?:\/\/(www\.google\.com\/search-personalization|myactivity\.google\.com)[^)]*\)$/,
+      /^(All|Videos|Forums|Images|Shopping|Short videos|News|Web|Books|Maps|Pro|More)$/,
+      /^AI Mode$/i,
+      /^(Good response|Bad response)$/i,
+      /^(Copy|Copied|Edit|Ask about|Share|Share public link)$/i,
+      /^Copied(Failed to copy)?Copy$/i,
+      /^Copied to clipboard/i, /^Failed to copy/i,
+      /^A copy of this chat/i, /^Thanks for letting us know$/i,
+      /^Google may use account/i, /^For legal issues/i,
+      /^AI responses may include mistakes/i,
+      /^This public link shares/i, /^You can delete this link/i, /^Can.t copy the link/i,
       /^(Facebook|Gmail|X|Reddit|WhatsApp)$/,
-      /^\[?(Facebook|Gmail|X|Reddit|WhatsApp|Share)\]?(\(https?:)?/,
-      // Source card duplicates / show-more UI
-      /^Show (less|all)$/i,
-      /^Shared$/i,
-      /^\d+ files?$/i,
-      // Sidebar / navigation chrome
-      /^Open sidebar$/i,
-      /^Close sidebar$/i,
-      /^New thread$/i,
-      /^See your Search history$/i,
-      /^AI Mode history$/i,
-      /^Personalization$/i,
-      /^Settings$/i,
-      /^Notebooks?$/i,
-      /^Untitled notebook$/i,
-      /^Recent$/i,
-      /^More options$/i,
-      // Input bar
+      /^Show (less|all)$/i, /^Shared$/i, /^\d+ files?$/i,
+      /^(Open|Close) sidebar$/i, /^New thread$/i, /^See your Search history$/i,
+      /^AI Mode history$/i, /^Personalization$/i, /^Settings$/i,
+      /^Notebooks?$/i, /^Untitled notebook$/i, /^Recent$/i, /^More options$/i,
+      /^Something went wrong\. Your history/i,
       /^(Microphone|Stop|Retry|Send|Transcribing\.*)$/i,
-      /^Add files, tools/i,
-      /^Ask about$/i,
-      /^My Ad Center$/i,
-      // Search tab nav (the link list at the top)
-      /^\[?(All|Videos|Forums|Images|Shopping|Short videos|News|Web|Books|Maps|Pro)\]?(\(\/search|\(https)/i,
-      // Repeated "Use code with caution." (keep first, strip dupes later)
+      /^Add files, tools/i, /^My Ad Center$/i,
       /^Use code with caution\.?$/i,
+      /^\d{1,2}:\d{2}$/, /^\d+[ms]$/,                          // video duration / age chips
     ];
+    const isImg  = (t) => /^!\[/.test(t);
+    const domain = (url) => (url.match(/^https?:\/\/([^/?#]+)/) || [,""])[1].replace(/^www\./, "");
 
-    const aLines  = sMd.split('\n');
-    const aOut    = [];
-    let   bInShare = false;  // inside a share-dialog block
+    const aIn  = sMd.split("\n");
+    const aOut = [];
+    let   oSeenCards = new Set();      // per-turn dedupe of source cards
+    const lastNonEmpty = () => { for (let j = aOut.length - 1; j >= 0; j--) if (aOut[j].trim()) return j; return -1; };
 
-    for (let i = 0; i < aLines.length; i++) {
-      const sLine    = aLines[i];
-      const sTrimmed = sLine.trim();
+    for (let i = 0; i < aIn.length; i++) {
+      let s = aIn[i];
+      let t = s.trim();
+      if (aDrop.some(rx => rx.test(t))) continue;
+      let m;
 
-      // Multi-line share-dialog block: "Share\nGood response\n..."
-      if (/^Share$/i.test(sTrimmed)) { bInShare = true; continue; }
-      if (bInShare) {
-        if (/^(Good response|##|You said:)/i.test(sTrimmed) || sTrimmed === '') bInShare = false;
-        else continue;
+      // Conversation title → H1
+      if ((m = t.match(/^(#+\s*)?AI Mode Conversation:\s*(.+)$/i))) {
+        aOut.push(`# ${m[2].trim()}`, ""); continue;
       }
 
-      if (aDropLine.some(rx => rx.test(sTrimmed))) continue;
-      aOut.push(sLine);
+      // Reply heading → label the preceding prompt "## You", emit "## AI Mode"
+      if (/^(#+\s*)?AI Mode reply for\b/i.test(t)) {
+        const j = lastNonEmpty();
+        if (j >= 0 && !/^#/.test(aOut[j].trim())) aOut.splice(j, 0, "", "## You", "");
+        aOut.push("", "## AI Mode", "");
+        oSeenCards = new Set();          // new turn → new card set
+        continue;
+      }
+
+      // "You said: q" → q
+      s = s.replace(/^\s*You said:\s*/i, ""); t = s.trim();
+
+      // Source card: "- [](url)" then name / title / snippet on following lines
+      if ((m = t.match(/^([-*]\s+)\[\]\((https?:[^)\s]+)\)$/))) {
+        const url = m[2];
+        const aMeta = [];
+        let k = i + 1;
+        while (k < aIn.length && aMeta.length < 3 && k - i < 10) {
+          const u = aIn[k].trim();
+          if (u && !isImg(u) && !aDrop.some(rx => rx.test(u))) aMeta.push(u);
+          k++;
+        }
+        i = k - 1;                                          // consume card lines
+        if (oSeenCards.has(url)) continue;                  // show-all/show-less dupe
+        oSeenCards.add(url);
+        const [sSite = domain(url), sTitle = domain(url), sSnip = ""] = aMeta;
+        const jp = lastNonEmpty();
+        if (jp >= 0 && !/^[-*]\s+\[/.test(aOut[jp].trim())) aOut.push("");   // blank before list
+        aOut.push(`- [${sTitle}](${url})` + (sSnip ? ` — ${sSnip}` : "") + (sSite && sSite !== sTitle ? ` *(${sSite})*` : ""));
+        continue;
+      }
+
+      // Inline empty-text citations → domain label so annotateRefs numbers them
+      s = s.replace(/\[\]\((https?:\/\/[^)\s]+)\)/g, (mm, url) => `[${domain(url)}](${url})`);
+      t = s.trim();
+
+      // Consecutive duplicate paragraph (sr-only prompt + visible prompt)
+      const j = lastNonEmpty();
+      if (t && j >= 0 && aOut[j].trim() === t) continue;
+
+      aOut.push(s);
     }
 
-    // ── Collapse 3+ blank lines → 2 ─────────────────────────────────────
-    return aOut.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    // Anything above the conversation H1 is sidebar/nav that slipped through
+    const nH1 = aOut.findIndex(l => /^# /.test(l));
+    if (nH1 > 0) aOut.splice(0, nH1);
+
+    return aOut.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   }
 
   ///////////////////////////////////////////////////////////////////////////
@@ -772,6 +801,10 @@
         let nIdx;
         if (oUrlToIdx.has(sUrl)) {
           nIdx = oUrlToIdx.get(sUrl);
+          // Upgrade the appendix label if a more descriptive one shows up
+          // later (e.g. Google source-card title after a domain-only inline)
+          const oRef = aRefs[nIdx - 1];
+          if (sText.length > oRef.sLabel.length) oRef.sLabel = sText;
         } else {
           nIdx = nNext++;
           oUrlToIdx.set(sUrl, nIdx);
