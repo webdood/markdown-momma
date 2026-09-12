@@ -97,18 +97,17 @@
       hostPattern: /www\.google\.com|google\.com/,
       // aioh=1 is the definitive AI Mode indicator; udm=50 is a fallback
       urlPattern: /[?&](aioh=1|udm=50)/,
+      // Google's jsname/class attributes are build-hashed and rotate on
+      // every deploy, so we do NOT hardcode them. The finder locates the
+      // thread structurally from the rendered turn-heading UI copy.
+      finder: findGoogleAIThread,
       selectors: [
-        // AI Mode conversation thread — ordered most-specific to broadest
-        "[data-async-id='air_answers']",      // async AI answers container
-        "air-answer",                          // custom element (some builds)
-        "div[data-q]",                         // per-turn Q&A wrappers
-        "[jscontroller][data-hveid]",          // AI result cards
-        "[data-attrid='wa:/summary']",         // AI Overview summary
-        "[data-md]",                           // markdown-rendered AI block
+        // Legacy AI Overview selectors — deep fallbacks only
+        "[data-async-id='air_answers']",
+        "[data-attrid='wa:/summary']",
         "div[class*='ai-overview']",
-        "div[class*='AiOverview']",
-        "#rcnt",                               // full result container (narrow)
-        "#center_col"                          // broadest fallback
+        "#rcnt",
+        "#center_col"
       ]
     }
   ];
@@ -158,6 +157,16 @@
 
       // If a urlPattern is specified, also check the full URL
       if (site.urlPattern && !site.urlPattern.test(window.location.href)) continue;
+
+      // Structural finder (site-specific, selector-free) wins if it hits
+      if (typeof site.finder === "function") {
+        try {
+          const found = site.finder();
+          if (found && found.offsetHeight > 0 && found.innerText.trim().length > 100) {
+            return { el: found, siteName: site.name };
+          }
+        } catch (e) { /* finder failed, fall through to selectors */ }
+      }
 
       for (const sel of site.selectors) {
         try {
@@ -241,6 +250,62 @@
     }
 
     return best;
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // findGoogleAIThread - locates the Google AI Mode conversation thread  //
+  //                      without relying on build-hashed jsname/classes  //
+  // ==================                                                    //
+  // Anchor: every AI turn renders the UI copy "AI Mode reply for <q>".   //
+  // Collect the elements owning that text, take their lowest common      //
+  // ancestor, then walk up until the "You said:" prompt copy is inside   //
+  // too. Returns the smallest element containing the whole thread.      //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function findGoogleAIThread() {
+    const REPLY_RX  = /^\s*AI Mode reply for/i;
+    const PROMPT_RX = /You said:/i;
+
+    // --- 1. Elements whose OWN text starts with the reply copy -----------
+    const aTurnEls = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let oNode;
+    while ((oNode = walker.nextNode())) {
+      if (!REPLY_RX.test(oNode.nodeValue)) continue;
+      const oEl = oNode.parentElement;
+      if (!oEl || oEl.offsetHeight === 0) continue;   // skip hidden/aria copies
+      aTurnEls.push(oEl);
+    }
+    if (aTurnEls.length === 0) return null;
+
+    // --- 2. Lowest common ancestor of all turn elements ------------------
+    const ancestors = (oEl) => {
+      const a = [];
+      for (let n = oEl; n; n = n.parentElement) a.push(n);
+      return a;
+    };
+    let aCommon = ancestors(aTurnEls[0]);
+    for (let i = 1; i < aTurnEls.length; i++) {
+      const oSet = new Set(ancestors(aTurnEls[i]));
+      aCommon = aCommon.filter(n => oSet.has(n));
+    }
+    let oLCA = aCommon[0] || null;
+    if (!oLCA) return null;
+
+    // --- 3. Climb until the "You said:" prompt copy is inside as well ----
+    //        (single-turn: LCA is the heading itself; multi-turn: LCA may
+    //        sit below the first user question)
+    let nGuard = 0;
+    while (oLCA && oLCA !== document.body && nGuard++ < 12 &&
+           !PROMPT_RX.test(oLCA.innerText || "")) {
+      oLCA = oLCA.parentElement;
+    }
+
+    // --- 4. Never return the whole page -----------------------------------
+    if (!oLCA || oLCA === document.body || oLCA === document.documentElement) {
+      return aCommon[0] || null;
+    }
+    return oLCA;
   }
 
   ///////////////////////////////////////////////////////////////////////////
