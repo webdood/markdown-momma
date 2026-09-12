@@ -1999,6 +1999,18 @@
       }
     });
 
+    // --- 2b. Response action bar (copy / share / thumbs / more). Container
+    //         is hash-classed; the buttons carry stable aria-labels. Remove
+    //         the smallest ancestor that holds the thumbs pair and no content.
+    oClone.querySelectorAll("[aria-label='Good response']").forEach(oUp => {
+      let n = oUp.parentElement;
+      for (let k = 0; n && k < 8; k++, n = n.parentElement) {
+        if (!n.querySelector("[aria-label='Bad response']")) continue;
+        if (n.querySelector("p, pre, h1, h2, h3, h4, ul, ol, table, img")) break;   // too wide
+        n.remove(); break;
+      }
+    });
+
     // --- 3b. Corroboration side panel: titles are harvested above; the
     //         panel itself duplicates the inline citations and renders as a
     //         floating column (wide whitespace in export). Delete it.
