@@ -256,7 +256,8 @@
   // findGoogleAIThread - locates the Google AI Mode conversation thread  //
   //                      without relying on build-hashed jsname/classes  //
   // ==================                                                    //
-  // Anchor: every AI turn renders the UI copy "AI Mode reply for <q>".   //
+  // Primary: [data-xid='aim-mars-turn-root'] per turn → LCA is thread.  //
+  // Fallback: every AI turn renders the copy "AI Mode reply for <q>".   //
   // Collect the elements owning that text, take their lowest common      //
   // ancestor, then walk up until the "You said:" prompt copy is inside   //
   // too. Returns the smallest element containing the whole thread.      //
@@ -265,6 +266,21 @@
   function findGoogleAIThread() {
     const REPLY_RX  = /^\s*AI Mode reply for/i;
     const PROMPT_RX = /You said:/i;
+
+    // --- 0. Preferred: semantic per-turn roots (data-xid is product-level
+    //        markup, not a build hash). Thread = LCA of all turn roots.
+    const aRoots = [...document.querySelectorAll("[data-xid='aim-mars-turn-root']")]
+      .filter(el => el.offsetHeight > 0);
+    if (aRoots.length === 1) return aRoots[0];
+    if (aRoots.length > 1) {
+      let oNode = aRoots[0].parentElement;
+      while (oNode && oNode !== document.body && !aRoots.every(r => oNode.contains(r))) {
+        oNode = oNode.parentElement;
+      }
+      if (oNode && oNode !== document.body) return oNode;
+    }
+
+    // --- Fallback: locate by rendered turn-heading copy --------------------
 
     // --- 1. Elements whose OWN text starts with the reply copy -----------
     const aTurnEls = [];
