@@ -2035,7 +2035,7 @@
     // --- 3b. Corroboration side panel: titles are harvested above; the
     //         panel itself duplicates the inline citations and renders as a
     //         floating column (wide whitespace in export). Delete it.
-    oClone.querySelectorAll("[data-xid='aim-aside-initial-corroboration-container']")
+    oClone.querySelectorAll("[data-xid*='corroboration'], [data-xid*='aside']")
       .forEach(n => n.remove());
 
     // --- 4. Headings --------------------------------------------------
@@ -2067,6 +2067,16 @@
       if (!code) { code = document.createElement("code"); code.textContent = pre.textContent; pre.textContent = ""; pre.appendChild(code); }
       if (sLang) code.className = "language-" + sLang;
     });
+
+    // --- Diagnostics: what semantic markers survived? Paste this line back
+    //     when something leaks — it names the container to add to the prune.
+    const oXid = {};
+    oClone.querySelectorAll("[data-xid]").forEach(n => {
+      const k = n.getAttribute("data-xid") || "(empty)";
+      oXid[k] = (oXid[k] || 0) + 1;
+    });
+    console.log("[MDM] Google AI clone after prune — data-xid inventory:", JSON.stringify(oXid),
+                "| ext anchors:", oClone.querySelectorAll("a[href^='http']").length);
   }
 
   ///////////////////////////////////////////////////////////////////////////
