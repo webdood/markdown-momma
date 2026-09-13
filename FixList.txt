@@ -1,0 +1,33 @@
+this code should be written such that it is a singleton
+window.markdownMomma should be the global created
+therefore the test for already-inserted wouold be if window.markDownMomma
+I should be able to go:
+
+window._markDownMomma.state.gDebug = true;
+
+window._markDownMomma = {
+  const : {
+    bFALSE : 0,
+    bTRUE : 1,
+    bDEBUGTOLOGFILE : 9
+  }
+  state : {
+    gDebug : bFALSE,	 
+  },
+ 
+log : function( aString ) {
+  let debugHappening = window._markDownMomma.gDebug;	//dereference
+  if (debugHappening )  {
+    console.log( aString );
+    if (debugHappening && window._markDownMomma.bDEBUGTOLOGFILE) { // always directly access varibles so as to avoid closure issues
+      window._markDownMomma.logMessageToFile( aString ); //     .... log message to file as well
+    }
+},
+logMessageToFile : function( aString ) {
+  if ( .. file has not been opened .. ) {
+    .. openTheFile ..
+  },
+.. logMessage to File
+}
+ 
+}

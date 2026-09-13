@@ -1,0 +1,17 @@
+# Default: LF everywhere, in repo and on checkout
+* text=auto eol=lf
+
+# cmd.exe scripts need CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binaries: never touch
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.pdf binary
+*.exe binary
+*.eld binary
