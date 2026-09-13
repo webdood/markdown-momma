@@ -1,7 +1,7 @@
 ///////////////////////////////////////////////////////////////////////////////
-// content.js - MarkDown Momma content script                       v1.4.2 //
+// content.js - MarkDown Momma content script                       v1.4.3 //
 // ==========                                                               //
-// Version: 1.4.2 — HTML export; modal only closes via ✕                    //
+// Version: 1.4.3 — Copy button (rich text / markdown)                     //
 // Element picker + auto-detect + modal preview + export (MD / PDF / Print) //
 // Image capture (dataURI inline, external wrapped in href target="_top")   //
 // Auto-scroll accumulator for lazy-loaded conversations                    //
@@ -19,7 +19,7 @@
 var __mdmFactory = function __mdmFactory() {
   "use strict";
 
-  const MDM_VERSION = "1.4.2";
+  const MDM_VERSION = "1.4.3";
   window.__markdownMommaActive = true;   // kept for older bookmarklets that check it
 
   // =========================================================================
@@ -708,6 +708,7 @@ var __mdmFactory = function __mdmFactory() {
     // Wire action buttons
     modalContainer.querySelector("#mdm-btn-print").addEventListener("click", () => handlePrint(markdownText));
     modalContainer.querySelector("#mdm-btn-md").addEventListener("click", () => handleSaveMarkdown(markdownText));
+    modalContainer.querySelector("#mdm-btn-copy").addEventListener("click", () => handleCopy(markdownText));
     modalContainer.querySelector("#mdm-btn-html").addEventListener("click", () => handleSaveHTML(markdownText));
     modalContainer.querySelector("#mdm-btn-pdf").addEventListener("click", () => handleSavePDF(markdownText));
     modalContainer.querySelector("#mdm-btn-close").addEventListener("click", () => shutdown());
@@ -1421,6 +1422,8 @@ var __mdmFactory = function __mdmFactory() {
           padding: 6px 10px;
         }
         #mdm-btn-toggle:hover { background: rgba(255,255,255,0.12); color: #ddd; }
+        #mdm-btn-copy { background: rgba(255,255,255,0.08); color: #bbb; }
+        #mdm-btn-copy:hover { background: rgba(255,255,255,0.12); color: #fff; }
 
         .mdm-sep {
           width: 1px;
@@ -1711,6 +1714,11 @@ var __mdmFactory = function __mdmFactory() {
           </div>
           <div id="mdm-btn-group">
             <button class="mdm-btn" id="mdm-btn-toggle">\u{1F4CB} RAW</button>
+            <button class="mdm-btn" id="mdm-btn-copy" title="Copy what's showing: rendered = rich text, RAW = markdown">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px">
+                <rect x="9" y="9" width="12" height="12" rx="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>Copy</button>
             <div class="mdm-sep"></div>
             <button class="mdm-btn" id="mdm-btn-print">\u{1F5A8}\uFE0F Print</button>
             <button class="mdm-btn" id="mdm-btn-md">\u{1F4BE} .MD</button>
@@ -1843,6 +1851,33 @@ var __mdmFactory = function __mdmFactory() {
 <body>
   ${rendered}
 </body></html>`;
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // handleCopy - copies whatever the preview is showing to the clipboard  //
+  // ==========                                                            //
+  // rendered → rich text (text/html + text/plain fallback) so Word, Docs, //
+  //            Gmail keep headings/lists/code; raw → the markdown string   //
+  ///////////////////////////////////////////////////////////////////////////
+
+  async function handleCopy(md) {
+    try {
+      if (previewMode === "raw" || !window.ClipboardItem) {
+        await navigator.clipboard.writeText(md);
+        showToast(previewMode === "raw" ? "Copied markdown" : "Copied as plain text");
+        return;
+      }
+      const sHtml = `<div style="font-family:-apple-system,Segoe UI,sans-serif;line-height:1.6">${renderMarkdown(md)}</div>`;
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html":  new Blob([sHtml], { type: "text/html" }),
+          "text/plain": new Blob([md],    { type: "text/plain" })
+        })
+      ]);
+      showToast("Copied rendered (rich text)");
+    } catch (e) {
+      showToast("Copy failed: " + (e && e.message ? e.message : e));
+    }
   }
 
   ///////////////////////////////////////////////////////////////////////////
@@ -2667,7 +2702,7 @@ var __mdmFactory = function __mdmFactory() {
 (function shepherd() {
   const oOld       = window.__MDM || null;
   const bLegacy    = !oOld && window.__markdownMommaActive === true;
-  const sNewVer    = "1.4.2";
+  const sNewVer    = "1.4.3";
 
   if (oOld && typeof oOld.shutdown === "function") {
     const bReplace = window.confirm(
