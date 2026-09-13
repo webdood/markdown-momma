@@ -1,8 +1,7 @@
 ///////////////////////////////////////////////////////////////////////////////
-// content.js - MarkDown Momma content script                       v1.4.1 //
+// content.js - MarkDown Momma content script                       v1.4.2 //
 // ==========                                                               //
-// Version: 1.4.1 — single selection bar (top), PICK button, viewport-       //
-//          relative auto-scroll stride                                     //
+// Version: 1.4.2 — HTML export; modal only closes via ✕                    //
 // Element picker + auto-detect + modal preview + export (MD / PDF / Print) //
 // Image capture (dataURI inline, external wrapped in href target="_top")   //
 // Auto-scroll accumulator for lazy-loaded conversations                    //
@@ -20,7 +19,7 @@
 var __mdmFactory = function __mdmFactory() {
   "use strict";
 
-  const MDM_VERSION = "1.4.1";
+  const MDM_VERSION = "1.4.2";
   window.__markdownMommaActive = true;   // kept for older bookmarklets that check it
 
   // =========================================================================
@@ -709,11 +708,13 @@ var __mdmFactory = function __mdmFactory() {
     // Wire action buttons
     modalContainer.querySelector("#mdm-btn-print").addEventListener("click", () => handlePrint(markdownText));
     modalContainer.querySelector("#mdm-btn-md").addEventListener("click", () => handleSaveMarkdown(markdownText));
+    modalContainer.querySelector("#mdm-btn-html").addEventListener("click", () => handleSaveHTML(markdownText));
     modalContainer.querySelector("#mdm-btn-pdf").addEventListener("click", () => handleSavePDF(markdownText));
     modalContainer.querySelector("#mdm-btn-close").addEventListener("click", () => shutdown());
 
     // Backdrop close
-    modalContainer.querySelector("#mdm-backdrop").addEventListener("click", () => shutdown());
+    // Backdrop click intentionally does NOT close: users save .md then .pdf
+    // and a stray click after a dialog used to tear the whole thing down.
 
     // Animate in
     requestAnimationFrame(() => {
@@ -1430,6 +1431,7 @@ var __mdmFactory = function __mdmFactory() {
 
         #mdm-btn-print { background: #4ecdc4; color: #0a0a14; }
         #mdm-btn-md    { background: #ff6b95; color: #fff; }
+        #mdm-btn-html  { background: #f59e0b; color: #0a0a14; }
         #mdm-btn-pdf   { background: #a78bfa; color: #fff; }
         #mdm-btn-close {
           background: rgba(255,255,255,0.08);
@@ -1712,6 +1714,7 @@ var __mdmFactory = function __mdmFactory() {
             <div class="mdm-sep"></div>
             <button class="mdm-btn" id="mdm-btn-print">\u{1F5A8}\uFE0F Print</button>
             <button class="mdm-btn" id="mdm-btn-md">\u{1F4BE} .MD</button>
+            <button class="mdm-btn" id="mdm-btn-html">\u{1F310} HTML</button>
             <button class="mdm-btn" id="mdm-btn-pdf">\u{1F4C4} PDF</button>
             <div class="mdm-sep"></div>
             <button class="mdm-btn" id="mdm-btn-close">\u2715</button>
@@ -1868,6 +1871,18 @@ var __mdmFactory = function __mdmFactory() {
   function handleSaveMarkdown(md) {
     const filename = generateFilename("md");
     downloadFile(md, filename, "text/markdown");
+    showToast(`Saved ${filename}`);
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  // handleSaveHTML - downloads the rendered document as a standalone     //
+  //                  .html (same dark theme the PDF button prints)        //
+  // ==============                                                        //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function handleSaveHTML(md) {
+    const filename = generateFilename("html");
+    downloadFile(getRenderedPageHTML(md, filename.replace(/\.html$/, ""), true), filename, "text/html");
     showToast(`Saved ${filename}`);
   }
 
@@ -2652,7 +2667,7 @@ var __mdmFactory = function __mdmFactory() {
 (function shepherd() {
   const oOld       = window.__MDM || null;
   const bLegacy    = !oOld && window.__markdownMommaActive === true;
-  const sNewVer    = "1.4.1";
+  const sNewVer    = "1.4.2";
 
   if (oOld && typeof oOld.shutdown === "function") {
     const bReplace = window.confirm(

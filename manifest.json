@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MarkDown Momma",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Capture AI conversations and save as Markdown, PDF, or Print",
   "permissions": ["activeTab", "scripting"],
   "icons": {
