@@ -1,18 +1,27 @@
 ///////////////////////////////////////////////////////////////////////////////
-// content.js - MarkDown Momma content script                               //
+// content.js - MarkDown Momma content script                       v1.4.0 //
 // ==========                                                               //
+// Version: 1.4.0 — singleton factory + shepherd (replace-or-keep on        //
+//          re-injection), real destructor, version stamp on boot           //
 // Element picker + auto-detect + modal preview + export (MD / PDF / Print) //
 // Image capture (dataURI inline, external wrapped in href target="_top")   //
 // Auto-scroll accumulator for lazy-loaded conversations                    //
 // Rendered Markdown preview with Raw/Rendered toggle                       //
 ///////////////////////////////////////////////////////////////////////////////
 
-(function () {
+///////////////////////////////////////////////////////////////////////////////
+// __mdmFactory - builds one MarkDown Momma instance and returns its API    //
+// ============                                                             //
+// Returns { version, main, shutdown }. Does NOT self-start: the shepherd   //
+// at the bottom of this file decides whether to build (and whether an     //
+// older instance on the page is torn down first).                          //
+///////////////////////////////////////////////////////////////////////////////
+
+var __mdmFactory = function __mdmFactory() {
   "use strict";
 
-  // Guard against double-injection
-  if (window.__markdownMommaActive) return;
-  window.__markdownMommaActive = true;
+  const MDM_VERSION = "1.4.0";
+  window.__markdownMommaActive = true;   // kept for older bookmarklets that check it
 
   // =========================================================================
   // CONSTANTS
@@ -1667,7 +1676,7 @@
           <div id="mdm-preview-rendered"></div>
         </div>
         <div id="mdm-footer">
-          <span>MarkDown Momma v1.0</span>
+          <span>MarkDown Momma v${MDM_VERSION}</span>
           <span id="mdm-char-count"></span>
         </div>
       </div>
@@ -2601,12 +2610,31 @@
   ///////////////////////////////////////////////////////////////////////////
 
   function shutdown() {
-    deactivatePicker();
+    deactivatePicker();                    // removes the capture-phase listeners
+    clearHighlight();                      // hover outline/background
+    if (selectedEl) {                      // selection outline/background
+      selectedEl.style.outline         = selectedEl.__mdmOrigOutline || "";
+      selectedEl.style.backgroundColor = selectedEl.__mdmOrigBg || "";
+      selectedEl.style.outlineOffset   = "";
+      selectedEl.style.outlineWidth    = "";
+      selectedEl.style.transition      = "";
+      delete selectedEl.__mdmOrigOutline;
+      delete selectedEl.__mdmOrigBg;
+      selectedEl = null;
+    }
+    if (autoDetectedEl) {                  // auto-detect dashed outline
+      autoDetectedEl.style.outline = "";
+      autoDetectedEl = null;
+    }
     destroyBanner();
     destroyConfirmBar();
     destroyModal();
     destroyProgress();
     window.__markdownMommaActive = false;
+    if (window.__MDM && window.__MDM.__instanceId === instanceId) {
+      window.__MDM = null;                 // a closed instance is not "on the page"
+    }
+    console.log("[MDM] v" + MDM_VERSION + " shut down");
   }
 
   // =========================================================================
@@ -2614,6 +2642,7 @@
   // =========================================================================
 
   function main() {
+    console.log("[MDM] v" + MDM_VERSION + " starting on " + window.location.hostname);
     const detected = autoDetectContainer();
     if (detected) {
       showAutoDetectBanner(detected.el, detected.siteName);
@@ -2622,5 +2651,54 @@
     }
   }
 
-  main();
+  const instanceId = Date.now() + Math.random();
+  return { version : MDM_VERSION, main, shutdown, __instanceId : instanceId };
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// shepherd - decides whether to build a new instance                       //
+// ========                                                                 //
+// No instance on the page          → build.                                //
+// Instance from this factory       → ask: replace (shut it down, build) or //
+//                                    keep (do nothing).                    //
+// Instance from a pre-1.4 build    → cannot be torn down (no handle): scrub //
+//                                    its DOM, warn that a reload is        //
+//                                    cleaner, then build.                  //
+///////////////////////////////////////////////////////////////////////////////
+
+(function shepherd() {
+  const oOld       = window.__MDM || null;
+  const bLegacy    = !oOld && window.__markdownMommaActive === true;
+  const sNewVer    = "1.4.0";
+
+  if (oOld && typeof oOld.shutdown === "function") {
+    const bReplace = window.confirm(
+      "MarkDown Momma v" + oOld.version + " is already on this page.\n\n" +
+      "OK      = replace it with v" + sNewVer + "\n" +
+      "Cancel  = keep the running instance"
+    );
+    if (!bReplace) {
+      console.log("[MDM] keeping existing v" + oOld.version);
+      return;
+    }
+    oOld.shutdown();
+  } else if (bLegacy) {
+    // Pre-1.4 instance: closure is unreachable. Best effort.
+    ["mdm-banner", "mdm-confirm-bar", "mdm-modal-container", "mdm-progress"]
+      .forEach(id => { const n = document.getElementById(id); if (n) { n.remove(); } });
+    document.querySelectorAll("*").forEach(n => {
+      if ("__mdmOrigOutline" in n) {
+        n.style.outline = n.__mdmOrigOutline || "";
+        n.style.backgroundColor = n.__mdmOrigBg || "";
+        delete n.__mdmOrigOutline; delete n.__mdmOrigBg;
+      }
+    });
+    console.warn("[MDM] replaced a pre-1.4 instance: its picker listeners may linger — reload if hover highlighting misbehaves");
+  }
+
+  // Next tick: lets the old instance's DOM removal paint before the new UI
+  setTimeout(function () {
+    window.__MDM = __mdmFactory();
+    window.__MDM.main();
+  }, 0);
 })();
