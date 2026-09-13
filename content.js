@@ -1,7 +1,7 @@
 ///////////////////////////////////////////////////////////////////////////////
-// content.js - MarkDown Momma content script                       v1.4.3 //
+// content.js - MarkDown Momma content script                       v1.4.4 //
 // ==========                                                               //
-// Version: 1.4.3 — Copy button (rich text / markdown)                     //
+// Version: 1.4.4 — print/PDF popup closes itself, focus returns to tab     //
 // Element picker + auto-detect + modal preview + export (MD / PDF / Print) //
 // Image capture (dataURI inline, external wrapped in href target="_top")   //
 // Auto-scroll accumulator for lazy-loaded conversations                    //
@@ -19,7 +19,7 @@
 var __mdmFactory = function __mdmFactory() {
   "use strict";
 
-  const MDM_VERSION = "1.4.3";
+  const MDM_VERSION = "1.4.4";
   window.__markdownMommaActive = true;   // kept for older bookmarklets that check it
 
   // =========================================================================
@@ -1895,6 +1895,10 @@ var __mdmFactory = function __mdmFactory() {
     printWin.document.close();
     printWin.focus();
     // Wait for fonts to load before printing
+    // When the print dialog closes (printed OR cancelled) close the popup so
+    // focus returns to the original tab. Settings live in Chrome's dialog
+    // (scale, headers/footers, background graphics) — not reachable from JS.
+    printWin.onafterprint = () => { try { printWin.close(); } catch (e) { /* already gone */ } window.focus(); };
     setTimeout(() => printWin.print(), 800);
   }
 
@@ -1936,6 +1940,10 @@ var __mdmFactory = function __mdmFactory() {
     pdfWin.document.write(getRenderedPageHTML(md, filename, true));
     pdfWin.document.close();
     pdfWin.focus();
+    // When the print dialog closes (printed OR cancelled) close the popup so
+    // focus returns to the original tab. Settings live in Chrome's dialog
+    // (scale, headers/footers, background graphics) — not reachable from JS.
+    pdfWin.onafterprint = () => { try { pdfWin.close(); } catch (e) { /* already gone */ } window.focus(); };
     setTimeout(() => pdfWin.print(), 800);
   }
 
@@ -2702,7 +2710,7 @@ var __mdmFactory = function __mdmFactory() {
 (function shepherd() {
   const oOld       = window.__MDM || null;
   const bLegacy    = !oOld && window.__markdownMommaActive === true;
-  const sNewVer    = "1.4.3";
+  const sNewVer    = "1.4.4";
 
   if (oOld && typeof oOld.shutdown === "function") {
     const bReplace = window.confirm(
