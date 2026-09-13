@@ -1,8 +1,8 @@
 ///////////////////////////////////////////////////////////////////////////////
-// content.js - MarkDown Momma content script                       v1.4.0 //
+// content.js - MarkDown Momma content script                       v1.4.1 //
 // ==========                                                               //
-// Version: 1.4.0 — singleton factory + shepherd (replace-or-keep on        //
-//          re-injection), real destructor, version stamp on boot           //
+// Version: 1.4.1 — single selection bar (top), PICK button, viewport-       //
+//          relative auto-scroll stride                                     //
 // Element picker + auto-detect + modal preview + export (MD / PDF / Print) //
 // Image capture (dataURI inline, external wrapped in href target="_top")   //
 // Auto-scroll accumulator for lazy-loaded conversations                    //
@@ -20,7 +20,7 @@
 var __mdmFactory = function __mdmFactory() {
   "use strict";
 
-  const MDM_VERSION = "1.4.0";
+  const MDM_VERSION = "1.4.1";
   window.__markdownMommaActive = true;   // kept for older bookmarklets that check it
 
   // =========================================================================
@@ -30,7 +30,8 @@ var __mdmFactory = function __mdmFactory() {
   const HIGHLIGHT_COLOR = "rgba(255, 107, 149, 0.25)";
   const HIGHLIGHT_BORDER = "2px solid #ff6b95";
   const AUTODETECT_BORDER = "2px dashed #4ecdc4";
-  const SCROLL_STEP_PX = 600;
+  const SCROLL_STEP_MIN_PX = 400;   // floor for tiny scroll containers
+  const SCROLL_STEP_RATIO  = 0.9;   // of the scroller's own clientHeight (10% overlap)
   const SCROLL_PAUSE_MS = 800;
   const FILENAME_PREFIX = "MarkDownMomma_";
   const MIN_CONTENT_LENGTH = 200;
@@ -213,6 +214,7 @@ var __mdmFactory = function __mdmFactory() {
       confirmBarEl.remove();
       confirmBarEl = null;
     }
+    removeById("mdm-confirm-bar");       // strays from a previous instance
     if (selectedEl) {
       selectedEl.style.outline = selectedEl.__mdmOrigOutline || "";
       selectedEl.style.backgroundColor = selectedEl.__mdmOrigBg || "";
@@ -486,8 +488,9 @@ var __mdmFactory = function __mdmFactory() {
   // ==============                                                        //
   ///////////////////////////////////////////////////////////////////////////
 
-  function showConfirmBar(el) {
+  function showConfirmBar(el, sSiteName) {
     destroyConfirmBar();
+    destroyBanner();
     highlightSelected(el);
 
     const textLen = el.innerText.trim().length;
@@ -501,7 +504,7 @@ var __mdmFactory = function __mdmFactory() {
       <style>
         #mdm-confirm-bar {
           position: fixed;
-          bottom: 20px;
+          top: 16px;
           left: 50%;
           transform: translateX(-50%);
           background: linear-gradient(135deg, #1a1a2e, #16213e);
@@ -519,9 +522,15 @@ var __mdmFactory = function __mdmFactory() {
           max-width: 90vw;
         }
         @keyframes mdmSlideUp {
-          from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+          from { opacity: 0; transform: translateX(-50%) translateY(-16px); }
           to   { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
+        #mdm-confirm-bar .mdm-site {
+          color: #4ecdc4;
+          font-weight: 700;
+          white-space: nowrap;
+        }
+        .mdm-cb-pick { background: #ff6b95; color: #fff; }
         #mdm-confirm-bar .mdm-info {
           color: #888;
           font-family: 'JetBrains Mono', monospace;
@@ -553,6 +562,7 @@ var __mdmFactory = function __mdmFactory() {
         }
       </style>
       <span>\u{1F4DD}</span>
+      ${sSiteName ? `<span class="mdm-site">${sSiteName}</span>` : ""}
       <span class="mdm-info">
         <strong>&lt;${tag}&gt;</strong>
         ${textLen.toLocaleString()} chars \u00B7
@@ -562,6 +572,7 @@ var __mdmFactory = function __mdmFactory() {
       <button class="mdm-cb-wider" id="mdm-cb-wider">\u2B06 Wider</button>
       <button class="mdm-cb-narrower" id="mdm-cb-narrower">\u2B07 Narrower</button>
       <button class="mdm-cb-confirm" id="mdm-cb-confirm">\u2714 Capture</button>
+      <button class="mdm-cb-pick" id="mdm-cb-pick" title="Click any element on the page">\u{1F3AF} Pick</button>
       <button class="mdm-cb-cancel" id="mdm-cb-cancel">\u2715</button>
     `;
     document.body.appendChild(confirmBarEl);
@@ -601,6 +612,12 @@ var __mdmFactory = function __mdmFactory() {
       captureElement(captureTarget);
     });
 
+    confirmBarEl.querySelector("#mdm-cb-pick").addEventListener("click", () => {
+      destroyConfirmBar();
+      clearSelection();
+      activatePicker();
+    });
+
     confirmBarEl.querySelector("#mdm-cb-cancel").addEventListener("click", () => {
       destroyConfirmBar();
       shutdown();
@@ -622,6 +639,10 @@ var __mdmFactory = function __mdmFactory() {
     scroller.scrollTop = 0;
     await sleep(SCROLL_PAUSE_MS);
 
+    // Stride is relative to the CONTAINER, not the monitor: the scroll only
+    // exists to run content past lazy-loaders, so ~one viewport per step with
+    // a small overlap is the fastest safe pace.
+    const scrollStep = Math.max(SCROLL_STEP_MIN_PX, Math.floor(scroller.clientHeight * SCROLL_STEP_RATIO));
     let lastHeight = scroller.scrollHeight;
     let stableCount = 0;
     let scrollPos = 0;
@@ -632,7 +653,7 @@ var __mdmFactory = function __mdmFactory() {
 
     while (iteration < maxIterations) {
       iteration++;
-      scrollPos += SCROLL_STEP_PX;
+      scrollPos += scrollStep;
       scroller.scrollTop = scrollPos;
       await sleep(SCROLL_PAUSE_MS);
 
@@ -983,6 +1004,28 @@ var __mdmFactory = function __mdmFactory() {
   }
 
   ///////////////////////////////////////////////////////////////////////////
+  // clearSelection - restores the selected element's original styles     //
+  // ==============                                                        //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function clearSelection() {
+    if (selectedEl) {
+      selectedEl.style.outline         = selectedEl.__mdmOrigOutline || "";
+      selectedEl.style.backgroundColor = selectedEl.__mdmOrigBg || "";
+      selectedEl.style.outlineOffset   = "";
+      selectedEl.style.outlineWidth    = "";
+      selectedEl.style.transition      = "";
+      delete selectedEl.__mdmOrigOutline;
+      delete selectedEl.__mdmOrigBg;
+      selectedEl = null;
+    }
+    if (autoDetectedEl) {
+      autoDetectedEl.style.outline = "";
+      autoDetectedEl = null;
+    }
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
   // convertToMarkdown - runs Turndown on HTML string                      //
   // =================                                                     //
   ///////////////////////////////////////////////////////////////////////////
@@ -1102,6 +1145,7 @@ var __mdmFactory = function __mdmFactory() {
       bannerEl.remove();
       bannerEl = null;
     }
+    removeById("mdm-banner");            // strays from a previous instance
     if (autoDetectedEl) {
       autoDetectedEl.style.outline = "";
       autoDetectedEl = null;
@@ -1118,6 +1162,7 @@ var __mdmFactory = function __mdmFactory() {
       modalContainer.remove();
       modalContainer = null;
     }
+    removeById("mdm-modal-container");   // strays from a previous instance
   }
 
   ///////////////////////////////////////////////////////////////////////////
@@ -1130,6 +1175,7 @@ var __mdmFactory = function __mdmFactory() {
       progressEl.remove();
       progressEl = null;
     }
+    removeById("mdm-progress");          // strays from a previous instance
   }
 
   ///////////////////////////////////////////////////////////////////////////
@@ -2261,6 +2307,16 @@ var __mdmFactory = function __mdmFactory() {
   }
 
   ///////////////////////////////////////////////////////////////////////////
+  // removeById - removes every element with the given id (stray copies   //
+  //              left by an earlier MDM instance on the same page)        //
+  // ==========                                                            //
+  ///////////////////////////////////////////////////////////////////////////
+
+  function removeById(sId) {
+    document.querySelectorAll("#" + sId).forEach(n => { n.remove(); });
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
   // renderInline - converts inline markdown (bold, italic, code, links)   //
   // ============                                                          //
   ///////////////////////////////////////////////////////////////////////////
@@ -2384,69 +2440,9 @@ var __mdmFactory = function __mdmFactory() {
   ///////////////////////////////////////////////////////////////////////////
 
   function showAutoDetectBanner(el, siteName) {
-    autoDetectedEl = el;
-    el.style.outline = AUTODETECT_BORDER;
-
-    bannerEl = document.createElement("div");
-    bannerEl.id = "mdm-banner";
-    bannerEl.innerHTML = `
-      <style>
-        #mdm-banner {
-          position: fixed;
-          top: 16px;
-          left: 50%;
-          transform: translateX(-50%);
-          background: linear-gradient(135deg, #1a1a2e, #16213e);
-          color: #e0e0e0;
-          padding: 14px 24px;
-          border-radius: 12px;
-          z-index: 2147483645;
-          font-family: 'DM Sans', -apple-system, sans-serif;
-          font-size: 14px;
-          box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08);
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          animation: mdmSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-        @keyframes mdmSlideIn {
-          from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
-          to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-        }
-        #mdm-banner button {
-          border: none;
-          border-radius: 6px;
-          padding: 6px 14px;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-          font-family: inherit;
-          transition: all 0.15s;
-        }
-        #mdm-banner button:hover { transform: translateY(-1px); }
-        .mdm-banner-accept { background: #4ecdc4; color: #0a0a14; }
-        .mdm-banner-pick   { background: #ff6b95; color: #fff; }
-        .mdm-banner-cancel  { background: rgba(255,255,255,0.08); color: #aaa; }
-      </style>
-      <span>\u{1F4DD}</span>
-      <span>Detected <strong style="color:#4ecdc4">${siteName}</strong> conversation</span>
-      <button class="mdm-banner-accept">CAPTURE THIS</button>
-      <button class="mdm-banner-pick">PICK DIFFERENT</button>
-      <button class="mdm-banner-cancel">CANCEL</button>
-    `;
-    document.body.appendChild(bannerEl);
-
-    bannerEl.querySelector(".mdm-banner-accept").addEventListener("click", () => {
-      destroyBanner();
-      showConfirmBar(el);
-    });
-    bannerEl.querySelector(".mdm-banner-pick").addEventListener("click", () => {
-      destroyBanner();
-      activatePicker();
-    });
-    bannerEl.querySelector(".mdm-banner-cancel").addEventListener("click", () => {
-      shutdown();
-    });
+    // v1.4.1: the top banner and bottom confirm bar were the same choices
+    // twice. Detection now lands directly on the single selection bar.
+    showConfirmBar(el, "Detected " + siteName);
   }
 
   ///////////////////////////////////////////////////////////////////////////
@@ -2612,20 +2608,7 @@ var __mdmFactory = function __mdmFactory() {
   function shutdown() {
     deactivatePicker();                    // removes the capture-phase listeners
     clearHighlight();                      // hover outline/background
-    if (selectedEl) {                      // selection outline/background
-      selectedEl.style.outline         = selectedEl.__mdmOrigOutline || "";
-      selectedEl.style.backgroundColor = selectedEl.__mdmOrigBg || "";
-      selectedEl.style.outlineOffset   = "";
-      selectedEl.style.outlineWidth    = "";
-      selectedEl.style.transition      = "";
-      delete selectedEl.__mdmOrigOutline;
-      delete selectedEl.__mdmOrigBg;
-      selectedEl = null;
-    }
-    if (autoDetectedEl) {                  // auto-detect dashed outline
-      autoDetectedEl.style.outline = "";
-      autoDetectedEl = null;
-    }
+    clearSelection();                      // selection + auto-detect outlines
     destroyBanner();
     destroyConfirmBar();
     destroyModal();
@@ -2669,7 +2652,7 @@ var __mdmFactory = function __mdmFactory() {
 (function shepherd() {
   const oOld       = window.__MDM || null;
   const bLegacy    = !oOld && window.__markdownMommaActive === true;
-  const sNewVer    = "1.4.0";
+  const sNewVer    = "1.4.1";
 
   if (oOld && typeof oOld.shutdown === "function") {
     const bReplace = window.confirm(
